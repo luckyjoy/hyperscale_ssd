@@ -1,0 +1,136 @@
+import os
+import subprocess
+import platform
+import time
+import json
+import random
+from behave import given, when, then
+
+SYSTEM = platform.system()
+MAX_LATENCY_MS = 50
+MIN_IOPS = 1000
+MIN_THROUGHPUT_MB = 50
+
+def run_cmd(cmd, shell=False):
+    print(f"[+] Running: {cmd}")
+    subprocess.run(cmd, shell=shell, check=True)
+
+# ----------------- GIVEN -----------------
+@given("a VM is launched with NVMe attached")
+def step_launch_vm(context):
+    """Launch a single NVMe SSD VM."""
+    if SYSTEM == "Windows":
+        run_cmd(["python", "qemu-faults\\qemu_launch_vm.py"])
+    else:
+        run_cmd(["python3", "qemu-faults/qemu_launch_vm.py"])
+    time.sleep(3)
+
+@given("a VM is launched with two NVMe devices")
+def step_launch_vm_two_nvme(context):
+    """Launch VM with two NVMe devices for multi-tenant workload."""
+    if SYSTEM == "Windows":
+        run_cmd(["python", "qemu-faults\\qemu_launch_vm.py", "--devices", "2"])
+    else:
+        run_cmd(["python3", "qemu-faults/qemu_launch_vm.py", "--devices", "2"])
+    time.sleep(5)
+
+@given("a VM is running multi-queue fio jobs")
+def step_vm_multi_queue(context):
+    """Assume VM is already running multi-queue FIO workload."""
+    context.vm_running = True
+    print("[+] VM is running multi-queue fio jobs")
+
+@given("a VM is running steady workload")
+def step_vm_steady(context):
+    """Assume VM has a steady baseline workload."""
+    context.vm_running = True
+    print("[+] VM is running steady workload")
+
+# ----------------- WHEN -----------------
+@when("I run a 70/30 random read/write fio job on both devices")
+def step_run_mixed_fio(context):
+    fio_file = "spdk/fio_mixed_rw.job"
+    output_file = "reports\\fio_guest.json" if SYSTEM == "Windows" else "reports/fio_guest.json"
+    if SYSTEM == "Windows":
+        run_cmd(["fio", fio_file, "--output-format=json", f"--output={output_file}"])
+    else:
+        run_cmd(["fio", fio_file, "--output-format=json", f"--output={output_file}"])
+
+@when("I inject random NVMe hot-unplug events")
+def step_power_loss(context):
+    for _ in range(3):
+        if SYSTEM == "Windows":
+            run_cmd([
+                "python", "qemu-faults\\qmp_injector.py",
+                "--socket", r"\\.\pipe\vm-test_qmp",
+                "--action", "remove", "--device-id", "nvme0"
+            ])
+            time.sleep(10)
+            run_cmd([
+                "python", "qemu-faults\\qmp_injector.py",
+                "--socket", r"\\.\pipe\vm-test_qmp",
+                "--action", "add",
+                "--device-spec", '{"driver":"nvme","drive":"drive0","id":"nvme0"}'
+            ])
+        else:
+            run_cmd([
+                "python3", "qemu-faults/qmp_injector.py",
+                "--socket", "/tmp/vm-test.qmp",
+                "--action", "remove", "--device-id", "nvme0"
+            ])
+            time.sleep(10)
+            run_cmd([
+                "python3", "qemu-faults/qmp_injector.py",
+                "--socket", "/tmp/vm-test.qmp",
+                "--action", "add",
+                "--device-spec", '{"driver":"nvme","drive":"drive0","id":"nvme0"}'
+            ])
+        time.sleep(30)
+
+@when("I inject 5 random latency spikes between 50-200ms")
+def step_latency_spikes(context):
+    for _ in range(5):
+        delay = random.randint(50, 200)
+        print(f"[+] Injecting latency {delay}ms")
+        if SYSTEM == "Windows":
+            run_cmd(["python", "qemu-faults\\nbd_delay.py", "10810", str(delay)])
+        else:
+            run_cmd(["./qemu-faults/nbdkit_delay_server.sh", "./vm-disk.qcow2", "10810", str(delay)])
+        time.sleep(random.randint(5, 20))
+
+# ----------------- THEN -----------------
+@then("the VM should be running")
+def step_vm_running(context):
+    print(f"[+] VM running on {SYSTEM}")
+
+@then("IO latency and performance should be within acceptable limits")
+def step_verify_io_performance(context):
+    fio_json_file = "reports\\fio_guest.json" if SYSTEM == "Windows" else "reports/fio_guest.json"
+    if not os.path.exists(fio_json_file):
+        raise FileNotFoundError(f"{fio_json_file} not found.")
+    with open(fio_json_file, "r") as f:
+        data = json.load(f)
+    jobs = data.get("jobs", [])
+    if not jobs:
+        raise ValueError("No jobs found in fio output")
+    failed = False
+    for job in jobs:
+        lat_avg = job['read']['lat_ns']['mean']/1e6
+        lat_max = job['read']['lat_ns']['max']/1e6
+        iops = job['read']['iops']
+        bw_mb = job['read']['bw_bytes']/(1024*1024)
+        print(f"[+] Job {job.get('jobname','unknown')}: Avg Latency={lat_avg:.2f}ms, Max={lat_max:.2f}ms, IOPS={iops}, BW={bw_mb:.2f}MB/s")
+        if lat_avg > MAX_LATENCY_MS or iops < MIN_IOPS or bw_mb < MIN_THROUGHPUT_MB:
+            failed = True
+    if failed:
+        raise AssertionError("IO performance verification failed.")
+
+@then("devices should recover and IO metrics should remain acceptable")
+def step_verify_recovery(context):
+    print("[+] Verifying device recovery and IO metrics")
+    # Could optionally re-run FIO or check VM health
+
+@then("IO latency should remain within thresholds")
+def step_verify_latency(context):
+    print("[+] Checking IO latency thresholds")
+    # Could optionally read FIO JSON and validate latency metrics

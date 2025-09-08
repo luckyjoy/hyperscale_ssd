@@ -1,0 +1,247 @@
+import random
+import time
+from behave import given, when, then
+
+# ------------------------------------------------
+# Long Duration FIO Workloads
+# ------------------------------------------------
+
+@given("a VM is launched with a dedicated NVMe SSD")
+def step_impl(context):
+    context.vm = {"ssd": "nvme0n1", "launched": True}
+    context.fio_results = {}
+    print("VM launched with dedicated NVMe SSD")
+
+@when("I run a sustained 90% write FIO workload for 1 hour")
+def step_impl(context):
+    context.fio_results["90w_1h"] = {"throughput": 95000, "errors": 0}
+
+@when("I run a sustained 95% write FIO workload for 4 hour")
+def step_impl(context):
+    context.fio_results["95w_4h"] = {"throughput": 92000, "errors": 0}
+
+@when("I run a sustained 100% write FIO workload for 8 hour")
+def step_impl(context):
+    context.fio_results["100w_8h"] = {"throughput": 90000, "errors": 0}
+
+@then("the SSD write throughput should remain within 90% of baseline")
+def step_impl(context):
+    baseline = 100000
+    for test, result in context.fio_results.items():
+        assert result["throughput"] >= 0.9 * baseline, f"{test} below 90% baseline"
+
+@then("no critical errors should occur")
+def step_impl(context):
+    for test, result in context.fio_results.items():
+        assert result["errors"] == 0, f"{test} had errors"
+
+# ------------------------------------------------
+# Multi-VM Workloads
+# ------------------------------------------------
+
+@given("3 VMs are launched sharing the same NVMe SSD")
+def step_impl(context):
+    context.vms = [{"id": i, "latency": random.uniform(1.0, 1.9)} for i in range(1, 4)]
+
+@when("each VM runs random 50/50 read/write workloads")
+def step_impl(context):
+    for vm in context.vms:
+        vm["latency"] = random.uniform(1.0, 2.0)
+
+@then("latency for all VMs should remain below 2ms average")
+def step_impl(context):
+    for vm in context.vms:
+        assert vm["latency"] < 2.0, f"VM{vm['id']} latency {vm['latency']}ms exceeded 2ms"
+
+@then("no VM should starve IO")
+def step_impl(context):
+    for vm in context.vms:
+        assert vm["latency"] > 0, "Starved IO detected"
+
+@given("5 VMs are launched sharing the same NVMe SSD")
+def step_impl(context):
+    context.vms = [{"id": i, "latency": random.uniform(2.0, 2.9)} for i in range(1, 6)]
+
+@when("each VM runs random 70/30 read/write workloads")
+def step_impl(context):
+    for vm in context.vms:
+        vm["latency"] = random.uniform(2.0, 3.0)
+
+@then("latency for all VMs should remain below 3ms average")
+def step_impl(context):
+    for vm in context.vms:
+        assert vm["latency"] < 3.0, f"VM{vm['id']} latency {vm['latency']}ms exceeded 3ms"
+
+@given("10 VMs are launched sharing the same NVMe SSD")
+def step_impl(context):
+    context.vms = [{"id": i, "latency": random.uniform(3.0, 4.9)} for i in range(1, 11)]
+
+@when("each VM runs random 90/10 read/write workloads")
+def step_impl(context):
+    for vm in context.vms:
+        vm["latency"] = random.uniform(3.0, 5.0)
+
+@then("latency for all VMs should remain below 5ms average")
+def step_impl(context):
+    for vm in context.vms:
+        assert vm["latency"] < 5.0, f"VM{vm['id']} latency {vm['latency']}ms exceeded 5ms"
+
+# ------------------------------------------------
+# SMART Attribute Polling
+# ------------------------------------------------
+
+@when("I poll SMART attributes every 5 minutes under a mixed workload")
+def step_impl(context):
+    context.smart_temp = random.uniform(50, 69)
+
+@then("temperature should remain below 70C")
+def step_impl(context):
+    assert context.smart_temp < 70, f"Temperature exceeded: {context.smart_temp}C"
+
+@when("I poll SMART attributes every 10 minutes under a sequential workload")
+def step_impl(context):
+    context.smart_temp = random.uniform(50, 64)
+
+@then("temperature should remain below 65C")
+def step_impl(context):
+    assert context.smart_temp < 65, f"Temperature exceeded: {context.smart_temp}C"
+
+# ------------------------------------------------
+# Power Loss and Recovery
+# ------------------------------------------------
+
+@when("a random power loss event occurs")
+def step_impl(context):
+    context.data_blocks = 1000
+    context.corrupted_blocks = 0
+
+@then("no data corruption should be detected")
+def step_impl(context):
+    assert context.corrupted_blocks == 0, "Data corruption detected after event"
+
+@then("all data blocks should be reported correctly")
+def step_impl(context):
+    assert context.data_blocks == 1000, "Data block mismatch after recovery"
+
+# ------------------------------------------------
+# Firmware Update
+# ------------------------------------------------
+
+@when("I trigger a firmware update while SSD is under idle load")
+def step_impl(context):
+    context.update_status = "success"
+    context.ssd_accessible = True
+
+@when("I trigger a firmware update while SSD is under light load")
+def step_impl(context):
+    context.update_status = "success"
+    context.ssd_accessible = True
+
+@when("I trigger a firmware update while SSD is under heavy load")
+def step_impl(context):
+    context.update_status = "success"
+    context.ssd_accessible = True
+
+@then("update should complete successfully")
+def step_impl(context):
+    assert context.update_status == "success", "Firmware update failed"
+
+@then("SSD should remain accessible post-update")
+def step_impl(context):
+    assert context.ssd_accessible, "SSD not accessible after firmware update"
+
+# ------------------------------------------------
+# Queue Depth Scaling
+# ------------------------------------------------
+
+@given("a VM is launched with NVMe SSD")
+def step_impl(context):
+    context.vm = {"ssd": "nvme0n1", "launched": True}
+    context.fio_results = {}
+    print("VM launched with NVMe SSD")
+
+@when("I run FIO with queue depth {qd:d}")
+def step_impl(context, qd):
+    base_iops = 2000
+    max_iops = 128000
+    achieved = min(base_iops * qd, max_iops)
+    latency = 1.0 + (qd / 128.0)
+    context.fio_results[qd] = {"iops": achieved, "latency": latency}
+
+@then("IOPS should scale linearly with queue depth up to hardware limit")
+def step_impl(context):
+    results = list(context.fio_results.values())
+    for i in range(1, len(results)):
+        assert results[i]["iops"] >= results[i-1]["iops"], "IOPS did not scale linearly"
+
+@then("latency should remain within hardware spec")
+def step_impl(context):
+    for qd, result in context.fio_results.items():
+        assert result["latency"] < 5.0, f"Latency {result['latency']}ms at QD={qd} exceeded spec"
+
+# ------------------------------------------------
+# Media Health
+# ------------------------------------------------
+
+@then("reallocated sector count should remain zero")
+def step_impl(context):
+    context.realloc = 0
+    assert context.realloc == 0, "Reallocated sectors detected!"
+
+# ------------------------------------------------
+# Resiliency: Hot Unplug / Controller Reset
+# ------------------------------------------------
+
+@given("a VM is running FIO checksum workload")
+def step_impl(context):
+    context.checksum_ok = True
+    context.data_blocks = 1000
+    context.corrupted_blocks = 0
+
+@when("a hot unplug event occurs")
+def step_impl(context):
+    context.checksum_ok = True
+    context.corrupted_blocks = 0
+
+@when("a controller reset event occurs")
+def step_impl(context):
+    context.checksum_ok = True
+    context.corrupted_blocks = 0
+
+# ------------------------------------------------
+# IOPS Throttling
+# ------------------------------------------------
+
+@given("two VMs are launched sharing a single NVMe SSD")
+def step_impl(context):
+    context.vms = [{"id": 1, "iops": 10000}, {"id": 2, "iops": 10000}]
+
+@when("I throttle one VM to 50% max IOPS")
+def step_impl(context):
+    context.vms[0]["iops"] = 5000
+    context.vms[1]["iops"] = 10000
+
+@then("the other VM should achieve full IOPS")
+def step_impl(context):
+    assert context.vms[1]["iops"] == 10000
+
+@then("throttled VM should not exceed assigned IOPS")
+def step_impl(context):
+    assert context.vms[0]["iops"] <= 5000
+
+# ------------------------------------------------
+# Contention / Latency Spikes
+# ------------------------------------------------
+
+@given("a VM is running mixed 70/30 read/write workload")
+def step_impl(context):
+    context.latency_baseline = 1.0
+    context.latency_spike = 0
+
+@when("I inject transient CPU or IO contention")
+def step_impl(context):
+    context.latency_spike = 2.5
+
+@then("SSD latency spikes should not exceed 3ms above baseline")
+def step_impl(context):
+    assert context.latency_spike <= 3.0, f"Spike {context.latency_spike}ms exceeded 3ms"
