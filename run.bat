@@ -1,6 +1,6 @@
 @echo off
 echo Demo Hyperscale SSD Tests by Bang Thien Nguyen, ontario1998@gmail.com ...
-echo behave --tags=@all --exclude "features/manual_tests/.*" -f html-pretty -o reports\validation_report.htmlecho 
+echo behave --tags=@all --exclude "features/manual_tests/.*" -f html-pretty -o reports\validation_report.html
 
 if not exist reports mkdir reports
 del /q reports\*.html
