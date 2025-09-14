@@ -4,6 +4,7 @@ temp/
 spdk/
 qemu-faults/
 logs/
+examples/
 
 # VM images & snapshots (HUGE files, never commit)
 *.qcow2

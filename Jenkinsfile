@@ -2,44 +2,76 @@ pipeline {
     agent any
 
     environment {
+        REPORT_DIR = "reports/windows/build_${BUILD_NUMBER}"
         PYTHON = "C:\\Users\\ontar\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
-        REPORT_BASE = "reports\\windows"
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10')) // Keep only last 10 builds
+        timestamps() // Add timestamps in console logs
     }
 
     stages {
+
         stage('Checkout') {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/luckyjoy/hyperscale_ssd.git'
+                git url: 'https://github.com/luckyjoy/hyperscale_ssd.git', branch: 'main'
             }
         }
 
         stage('Install Dependencies') {
             steps {
-                bat "${env.PYTHON} -m pip install --upgrade pip"
-                bat "${env.PYTHON} -m pip install -r requirements.txt"
+                bat "${PYTHON} -m pip install --upgrade pip"
+                bat "${PYTHON} -m pip install -r requirements.txt"
             }
         }
 
-        stage('Prepare Report Directories') {
+        stage('Prepare Report Directory') {
             steps {
-                script {
-                    // Create a unique report folder for each build
-                    env.REPORT_DIR = "${env.REPORT_BASE}\\build_${BUILD_NUMBER}"
-                    bat "mkdir ${env.REPORT_DIR}"
-                }
+                bat "mkdir \"${REPORT_DIR}\""
             }
         }
 
         stage('Run Behave Tests') {
             steps {
                 script {
-                    def behaveReport = "${env.REPORT_DIR}\\validation_report.html"
-                    try {
-                        bat "${env.PYTHON} -m behave --tags=@adv --exclude \"features/manual_tests/.*\" -f html-pretty -o ${behaveReport}"
-                        env.BEHAVE_STATUS = "PASS"
-                    } catch (err) {
-                        env.BEHAVE_STATUS = "FAILED"
+                    // Prepare Behave command
+                    def behaveCommand = "${PYTHON} -m behave --tags=@all --exclude \"features/manual_tests/.*\" -f html-pretty -o \"${REPORT_DIR}/validation_report.html\""
+
+                    // Run Behave and capture exit code (do not fail pipeline immediately)
+                    def exitCode = bat(script: behaveCommand, returnStatus: true)
+
+                    // Edit HTML report if it exists
+                    def reportFile = "${REPORT_DIR}/validation_report.html"
+                    if (fileExists(reportFile)) {
+                        def content = readFile(reportFile)
+
+                        // Update HTML title with build number
+                        content = content.replace(
+                            "<title>Behave Report</title>",
+                            "<title>Behave Test Report - Build ${BUILD_NUMBER}</title>"
+                        )
+
+                        // Inject CSS for pass/fail color coding & dark mode
+                        def cssInjection = """
+                        <style>
+                            .passed { color: green; font-weight: bold; }
+                            .failed { color: red; font-weight: bold; }
+                            .skipped { color: orange; font-weight: bold; }
+                            .undefined { color: gray; font-weight: bold; }
+                            body { background-color: #1e1e1e; color: #ffffff; }
+                        </style>
+                        """.stripIndent()
+
+                        content = content.replace("</head>", "${cssInjection}</head>")
+                        writeFile file: reportFile, text: content
+                    }
+
+                    // Mark build UNSTABLE if tests failed
+                    if (exitCode != 0) {
+                        unstable("⚠️ Behave tests failed with exit code ${exitCode}")
+                    } else {
+                        echo "✅ All Behave tests passed!"
                     }
                 }
             }
@@ -47,35 +79,37 @@ pipeline {
 
         stage('Publish HTML Report') {
             steps {
-                script {
-                    // Publish HTML report
-                    publishHTML([
-                        allowMissing: false,
-                        alwaysLinkToLastBuild: true,
-                        keepAll: true,
-                        reportDir: env.REPORT_DIR,
-                        reportFiles: 'validation_report.html',
-                        reportName: "Behave Test Report - Build ${BUILD_NUMBER}"
-                    ])
-
-                    // Colorize status for console output
-                    def color = env.BEHAVE_STATUS == "PASS" ? "green" : "red"
-                    echo "\u001B[38;5;10m✅ \u001B[0mBehave Test Report URL: https://localhost:8443/job/SSD_Hyperscale/${BUILD_NUMBER}/htmlreports/${BUILD_NUMBER}/validation_report.html"
-                    echo "Status: \u001B[38;5;${color}m${env.BEHAVE_STATUS}\u001B[0m"
-                }
+                publishHTML([
+                    allowMissing: false,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: "${REPORT_DIR}",
+                    reportFiles: 'validation_report.html',
+                    reportName: "Behave Test Report - Build ${BUILD_NUMBER}",
+                    reportTitles: "SSD Hyperscale Validation - Build ${BUILD_NUMBER}"
+                ])
             }
         }
 
-        stage('Archive Screenshots') {
+        stage('Archive Report Artifacts') {
             steps {
-                archiveArtifacts artifacts: 'screenshots/**/*.*', allowEmptyArchive: true
+                archiveArtifacts artifacts: "${REPORT_DIR}/**/*", fingerprint: true
             }
         }
     }
 
     post {
         always {
-            echo "Pipeline finished. Build Status: ${currentBuild.currentResult}"
+            echo "📄 HTML report is available in Jenkins."
+        }
+        success {
+            echo "🎉 Pipeline completed successfully!"
+        }
+        unstable {
+            echo "⚠️ Pipeline is UNSTABLE due to test failures. Check the report!"
+        }
+        failure {
+            echo "❌ Pipeline failed due to unexpected errors."
         }
     }
 }

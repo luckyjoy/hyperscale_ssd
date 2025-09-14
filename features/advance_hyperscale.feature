@@ -2,7 +2,7 @@
 Feature: Advanced SSD Hyperscale Simulation
 To validate SSD behavior under realistic hyperscale workloads, including endurance, QoS, and error conditions.
 
-@endurance
+@endurance 
 Scenario Outline: <REQ_SSD_10> <REQ_SSD_11> Sustained high-write endurance
 Given a VM is launched with a dedicated NVMe SSD
 When I run a sustained <percent>% write FIO workload for <duration> hour
@@ -10,7 +10,6 @@ Then the SSD write throughput should remain within 90% of baseline
 And no critical errors should occur
 
 Examples:
-
   | percent | duration |
   | 90      | 1        |
   | 95      | 4        |

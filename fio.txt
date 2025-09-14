@@ -1,1 +1,0 @@
-fio.exe --name=sequential_write --rw=write --bs=128k --size=1g --iodepth=32 --direct=1 --numjobs=1 --runtime=30 --output-format=json --filename=test_file.dat

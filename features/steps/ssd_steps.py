@@ -203,6 +203,7 @@ def step_impl(context, interval_minutes, workload_type):
     context.fio_executor.run_smart_test(interval_minutes, workload_type)
 
 @when('a random power loss event occurs')
+#@when('I inject 5 random latency spikes between 50-200ms')
 @when('I inject random NVMe hot-unplug events')
 def step_impl(context):
     context.fio_executor.results['checksum_errors'] = 0
