@@ -1,4 +1,4 @@
-# validation_plan_builder.py
+# builder.py
 # Author: Bang Thien Nguyen
 # Purpose: Build a dynamic and comprehensive Validation Plan based on input metadata validation.json and Behave scenarios under features directory
 
@@ -58,7 +58,6 @@ def parse_feature_file(file_path):
         step_match = re.match(r'^(Given|When|Then|And|But)\s+(.*)$', line)
         if step_match and current_scenario:
             step_text = step_match.group(0)
-            # Apply regex to style variables in the step text
             formatted_step = re.sub(r'<([^>]+)>', r'<span class="text-blue-600 font-bold">\1</span>', step_text)
             current_scenario['steps'].append(formatted_step)
             in_examples = False
@@ -70,7 +69,6 @@ def parse_feature_file(file_path):
             continue
         
         if in_examples and current_scenario:
-            # Apply the same regex to the example lines to style variables
             formatted_example = re.sub(r'<([^>]+)>', r'<span class="text-blue-600 font-bold">\1</span>', line)
             current_scenario['examples'].append(formatted_example)
     
@@ -81,7 +79,6 @@ def parse_feature_file(file_path):
 
 
 def get_value(data, possible_keys, default=None):
-    """Safely retrieve a value from a dictionary by checking multiple possible key names."""
     for key in possible_keys:
         if key in data:
             return data[key]
@@ -97,63 +94,56 @@ def build_feature_sections(features):
         feature_id = re.sub(r'[^a-z0-9]+', '-', feature['title'].lower()).strip('-')
         toc_links += f"          <li><a href=\"#{feature_id}\" class=\"block p-2 rounded hover:bg-gray-200 transition-colors duration-150\">{feature['title']}</a></li>\n"
         
-        sections += f'    <section id="{feature_id}" class="mb-8 p-6 bg-white rounded-xl shadow-md">\n'
-        sections += f"        <div class=\"flex items-center gap-2 mb-2\">\n"
-        sections += f"            <h3 class=\"text-2xl font-semibold text-gray-900\">{feature['title']}</h3>\n"
-        sections += f"            <button class=\"toggle-feature-btn text-gray-400 hover:text-gray-600 transition-colors duration-150\" data-target=\"{feature_id}\">\n"
-        sections += f"              <svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke-width=\"2.5\" stroke=\"currentColor\" class=\"w-5 h-5 transition-transform duration-200\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M8.25 4.5l7.5 7.5-7.5 7.5\" /></svg>\n"
-        sections += f"            </button>\n"
-        sections += f"        </div>\n"
-        sections += f"        <p class=\"text-gray-600 mb-6\"><strong>Feature:</strong> {feature['description']}</p>\n"
-        sections += f"        <div class=\"feature-scenarios-container\">\n"
-
+        sections += f'<details id="{feature_id}" class="mb-8 bg-white rounded-xl shadow-md" open>\n'
+        sections += f'  <summary class="flex items-center justify-between cursor-pointer px-6 py-4 text-2xl font-semibold text-gray-900 hover:text-blue-700 transition-colors duration-150">\n'
+        sections += f'    {feature["title"]}\n'
+        sections += f'    <span class="chevron transition-transform duration-300">▶</span>\n'
+        sections += f'  </summary>\n'
+        sections += f'  <div class="p-6 border-t border-gray-200">\n'
+        sections += f"    <p class=\"text-gray-600 mb-6\"><strong>Feature:</strong> {feature['description']}</p>\n"
+        
         for scenario in feature['scenarios']:
             scenario_summary = scenario['name'].replace('<', '&lt;').replace('>', '&gt;')
-            sections += f"          <details class=\"scenario-details mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200\">\n"
-            sections += f"            <summary class=\"cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150\">{scenario_summary}</summary>\n"
-            sections += f"            <div class=\"mt-4 pl-4 border-l-2 border-gray-300\">\n"
-            sections += f"              <ul class=\"list-disc list-inside space-y-1 text-sm text-gray-700\">\n"
+            sections += f"    <details class=\"mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200\">\n"
+            sections += f"      <summary class=\"cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150\">{scenario_summary}</summary>\n"
+            sections += f"      <div class=\"mt-4 pl-4 border-l-2 border-gray-300\">\n"
+            sections += f"        <ul class=\"list-disc list-inside space-y-1 text-sm text-gray-700\">\n"
             for step in scenario['steps']:
-                sections += f"                <li>{step}</li>\n"
+                sections += f"          <li>{step}</li>\n"
             if scenario['examples']:
-                sections += f"                <div class=\"mt-4\"><strong class=\"text-sm text-gray-700\">Examples:</strong></div>\n"
-                sections += f"                <div class=\"overflow-x-auto\">\n"
-                sections += f"                  <table class=\"min-w-full divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300\">\n"
-                sections += f"                    <thead class=\"bg-gray-100\">\n"
-                sections += f"                      <tr>\n"
+                sections += f"          <div class=\"mt-4\"><strong class=\"text-sm text-gray-700\">Examples:</strong></div>\n"
+                sections += f"          <div class=\"overflow-x-auto\">\n"
+                sections += f"            <table class=\"min-w-full divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300\">\n"
+                sections += f"              <thead class=\"bg-gray-100\">\n"
+                sections += f"                <tr>\n"
                 header = scenario['examples'][0]
-                # Split the header line and create <th> tags with the pre-formatted content
                 headers = [h.strip() for h in header.strip('|').split('|') if h.strip()]
                 for h in headers:
-                    sections += f"                        <th scope=\"col\" class=\"px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500\">{h}</th>\n"
-                sections += f"                      </tr>\n"
-                sections += f"                    </thead>\n"
-                sections += f"                    <tbody class=\"bg-white divide-y divide-gray-200\">\n"
+                    sections += f"                  <th scope=\"col\" class=\"px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500\">{h}</th>\n"
+                sections += f"                </tr>\n"
+                sections += f"              </thead>\n"
+                sections += f"              <tbody class=\"bg-white divide-y divide-gray-200\">\n"
                 data_rows = scenario['examples'][1:]
                 for row in data_rows:
-                    sections += f"                      <tr>\n"
+                    sections += f"                <tr>\n"
                     cells = [c.strip() for c in row.strip('|').split('|') if c.strip()]
                     for cell in cells:
-                        sections += f"                        <td class=\"px-6 py-4 whitespace-nowrap text-sm text-gray-900\">{cell}</td>\n"
-                    sections += f"                      </tr>\n"
-                sections += f"                    </tbody>\n"
-                sections += f"                  </table>\n"
-                sections += f"                </div>\n"
-            sections += f"              </ul>\n"
-            sections += f"            </div>\n"
-            sections += f"          </details>\n"
-        sections += f"        </div>\n"
-        sections += "    </section>\n\n"
+                        sections += f"                  <td class=\"px-6 py-4 whitespace-nowrap text-sm text-gray-900\">{cell}</td>\n"
+                    sections += f"                </tr>\n"
+                sections += f"              </tbody>\n"
+                sections += f"            </table>\n"
+                sections += f"          </div>\n"
+            sections += f"        </ul>\n"
+            sections += f"      </div>\n"
+            sections += f"    </details>\n"
+        sections += f'  </div>\n'
+        sections += f'</details>\n\n'
     
     return sections, toc_links
 
 
 def generate_validation_plan_html(metadata, features, manual_features):
-    """
-    Generates the validation plan HTML from metadata and parsed feature files.
-    """
-
-    # Build traceability (both manual + automated)
+    # Build traceability
     traceability_data = {}
     for collection in [features, manual_features]:
         for feature in collection:
@@ -194,7 +184,6 @@ def generate_validation_plan_html(metadata, features, manual_features):
                 traceability_table_html += "</tr>\n"
         traceability_table_html += "</tbody></table></div>"
 
-    # Sections for features
     automated_feature_sections, automated_feature_toc_links = build_feature_sections(features)
     manual_feature_sections, manual_feature_toc_links = build_feature_sections(manual_features)
 
@@ -214,6 +203,7 @@ def generate_validation_plan_html(metadata, features, manual_features):
   #resize-bar {{ width: 8px; cursor: ew-resize; background-color: #e2e8f0; transition: background-color 0.2s ease; }}
   #resize-bar:hover {{ background-color: #cbd5e1; }}
   #content-panel {{ flex-grow: 1; overflow-y: auto; }}
+  details[open] > summary .chevron {{ transform: rotate(90deg); }}
 </style>
 </head>
 <body class="bg-gray-100 text-gray-800">
@@ -362,13 +352,27 @@ def generate_validation_plan_html(metadata, features, manual_features):
     </section>
 
     <section id="automated-features" class="mb-8 p-6 bg-white rounded-xl shadow-md">
-      <h2 class="text-2xl font-semibold text-gray-900 mb-6">Automated Behave Features & Scenarios</h2>
-      {automated_feature_sections}
+      <details open>
+        <summary class="flex items-center justify-between cursor-pointer text-2xl font-semibold text-gray-900 hover:text-blue-700">
+          Automated Behave Features & Scenarios
+          <span class="chevron transition-transform duration-300">▶</span>
+        </summary>
+        <div class="mt-4">
+          {automated_feature_sections}
+        </div>
+      </details>
     </section>
 
     <section id="manual-features" class="mb-8 p-6 bg-white rounded-xl shadow-md">
-      <h2 class="text-2xl font-semibold text-gray-900 mb-6">Manual Test Features & Scenarios</h2>
-      {manual_feature_sections}
+      <details>
+        <summary class="flex items-center justify-between cursor-pointer text-2xl font-semibold text-gray-900 hover:text-blue-700">
+          Manual Test Features & Scenarios
+          <span class="chevron transition-transform duration-300">▶</span>
+        </summary>
+        <div class="mt-4">
+          {manual_feature_sections}
+        </div>
+      </details>
     </section>
 
     <section id="traceability-matrix" class="mb-8 p-6 bg-white rounded-xl shadow-md">
@@ -411,27 +415,6 @@ document.addEventListener('DOMContentLoaded', () => {{
     document.body.style.userSelect = 'auto';
     document.body.style.cursor = 'default';
   }});
-
-  // Handle expand/collapse for feature sections
-  document.querySelectorAll('.toggle-feature-btn').forEach(button => {{
-    button.addEventListener('click', () => {{
-      const targetId = button.dataset.target;
-      const scenarios = document.getElementById(targetId).querySelectorAll('.scenario-details');
-      const allOpen = Array.from(scenarios).every(detail => detail.open);
-      
-      scenarios.forEach(detail => {{
-        detail.open = !allOpen;
-      }});
-      
-      const icon = button.querySelector('svg');
-      if (!allOpen) {{
-        icon.style.transform = 'rotate(90deg)';
-      }} else {{
-        icon.style.transform = 'rotate(0deg)';
-      }}
-    }});
-  }});
-
 }});
 </script>
 
@@ -440,11 +423,11 @@ document.addEventListener('DOMContentLoaded', () => {{
 """
     return html_content
 
+
 def main():
-    """Main function to parse arguments and generate the validation plan."""
     if len(sys.argv) != 3:
         print("❌ Error: Invalid number of arguments.")
-        print("Usage: python validation_plan_builder.py <metadata.json> <features_dir>")
+        print("Usage: python builder.py <metadata.json> <features_dir>")
         sys.exit(1)
 
     metadata_file_path = sys.argv[1]
@@ -461,11 +444,9 @@ def main():
 
         print(f"✅ Input files found. Parsing data from '{features_dir_path}' and '{metadata_file_path}'...")
         
-        # Load metadata
         with open(metadata_file_path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
 
-        # Walk features directory and parse files
         features = []
         manual_features = []
         for root, _, files in os.walk(features_dir_path):
@@ -502,7 +483,6 @@ def main():
         sys.exit(1)
     except Exception as e:
         print(f"❌ An unexpected error occurred: {e}")
-        print("Please check your input files for any malformed data. Full traceback below:")
         import traceback
         traceback.print_exc()
         sys.exit(1)
