@@ -113,7 +113,7 @@ def build_feature_sections(features):
             if scenario['examples']:
                 sections += f"          <div class=\"mt-4\"><strong class=\"text-sm text-gray-700\">Examples:</strong></div>\n"
                 sections += f"          <div class=\"overflow-x-auto\">\n"
-                sections += f"            <table class=\"min-w-full divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300\">\n"
+                sections += f"            <table class=\"w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300\">\n"
                 sections += f"              <thead class=\"bg-gray-100\">\n"
                 sections += f"                <tr>\n"
                 header = scenario['examples'][0]
@@ -209,7 +209,6 @@ def generate_validation_plan_html(metadata, features, manual_features):
 <body class="bg-gray-100 text-gray-800">
 
 <div class="resizable-container">
-  <!-- TOC -->
   <div id="toc-panel" class="flex-shrink-0 bg-white shadow-xl p-6 overflow-y-auto">
     <h2 class="text-2xl font-bold mb-4 text-gray-900">📑 Table of Contents</h2>
     <nav>
@@ -237,13 +236,16 @@ def generate_validation_plan_html(metadata, features, manual_features):
     </nav>
   </div>
 
-  <!-- Resizer -->
   <div id="resize-bar"></div>
 
-  <!-- Main -->
   <div id="content-panel" class="flex-1 p-8 overflow-y-auto">
     <header class="bg-white rounded-xl shadow-lg p-6 mb-8">
-      <h1 class="text-4xl font-extrabold text-gray-900">{metadata.get('Title', 'Validation Plan')}</h1>
+      <div class="flex items-center justify-between">
+        <h1 class="text-4xl font-extrabold text-gray-900">{metadata.get('Title', 'Validation Plan')}</h1>
+        <button id="toggle-all-btn" class="px-4 py-2 bg-blue-500 text-white font-semibold rounded-lg shadow-md hover:bg-blue-600 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75">
+          Collapse All
+        </button>
+      </div>
       <p class="text-lg text-gray-600 mt-2">Comprehensive Validation Plan Summary</p>
       <div class="mt-4 flex flex-wrap gap-6 text-sm text-gray-500">
         <span><strong>Version:</strong> {metadata.get('Version', 'N/A')}</span>
@@ -414,6 +416,28 @@ document.addEventListener('DOMContentLoaded', () => {{
     isResizing = false;
     document.body.style.userSelect = 'auto';
     document.body.style.cursor = 'default';
+  }});
+
+  const toggleAllBtn = document.getElementById('toggle-all-btn');
+  toggleAllBtn.addEventListener('click', () => {{
+    const allDetails = document.querySelectorAll('details');
+    let allOpen = true;
+
+    allDetails.forEach(detail => {{
+      if (!detail.open) {{
+        allOpen = false;
+      }}
+    }});
+
+    allDetails.forEach(detail => {{
+      detail.open = !allOpen;
+    }});
+
+    if (allOpen) {{
+      toggleAllBtn.textContent = 'Expand All';
+    }} else {{
+      toggleAllBtn.textContent = 'Collapse All';
+    }}
   }});
 }});
 </script>

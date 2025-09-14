@@ -11,11 +11,11 @@ And latency should remain within hardware spec
 
 Examples:
   | qd  |
-  | 1   |
-  | 16  |
   | 32  |
   | 64  |
   | 128 |
+  | 256 |
+  | 512 |
 
 @rw
 Scenario Outline: <REQ_SSD_05> Read/write workload mixes
