@@ -5,6 +5,7 @@ echo Hyperscale SSD Automation by Bang Thien Nguyen, ontario1998@gmail.com ...
 
 if not exist reports mkdir reports 
 del /q reports\*.html 2>nul
+rem behave --tags=@all --exclude "features/manual_tests" --step_timeout=SECONDS -f html-pretty -o reports\automation_report.html
 behave --tags=@all --exclude "features/manual_tests" -f html-pretty -o reports\automation_report.html
 
 rem Set the source file name.
@@ -44,19 +45,19 @@ rem === Build Supporting Reports ===
 rem The following scripts were updated to take a single <features_dir> argument.
 echo.
 echo Building Test Coverage Report...
-python test_coverage.py reports\ssd_requirements.csv features
+python tools\test_coverage.py reports\ssd_requirements.csv features
 
 echo.
 echo Building PRD Summary Report...
-python prd2html.py reports\product.json reports\ssd_requirements.csv
+python tools\prd2html.py reports\product.json reports\ssd_requirements.csv
 
 echo.
 echo Building Validation Plan...
-python validation_plan_builder.py reports\validation.json features
+python tools\validation_plan_builder.py reports\validation.json features
 
 echo.
 echo Building Automation Rate Metric...
-python automation_rate.py features
+python tools\automation_rate.py features
 
 rem === Open Reports in Browser ===
 echo.

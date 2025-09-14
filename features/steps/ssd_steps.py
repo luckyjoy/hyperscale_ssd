@@ -9,16 +9,15 @@ import re
 
 """
 class FIOExecutor:
-    """
-    A real action class to execute fio commands and parse the JSON output.
-    """
+    # A real action class to execute fio commands and parse the JSON output.
+   
     def __init__(self, fio_path="fio.exe"):
         self.fio_path = fio_path
         self.results = {}
-        self.baseline_throughput = 100000
+        self.baseline_throughput = 0.0
         self.previous_iops = 0
 
-    def _execute_fio_command(self, job_name, rw_type, bs, size, iodepth, runtime, numjobs=1, rwmixread=None, rwmixwrite=None):
+    def _execute_fio_command(self, job_name, rw_type, bs, iodepth, runtime, numjobs=1, rwmixread=None, rwmixwrite=None):
         output_file = f"{job_name}_output.json"
         
         command = [
@@ -26,7 +25,6 @@ class FIOExecutor:
             f'--name={job_name}',
             f'--rw={rw_type}',
             f'--bs={bs}',
-            f'--size={size}',
             f'--iodepth={iodepth}',
             '--direct=1',
             '--thread=1', # Add this to get rid of the warning in the output
@@ -39,79 +37,69 @@ class FIOExecutor:
 
         if rwmixread is not None:
             command.append(f'--rwmixread={rwmixread}')
-
+        
         if rwmixwrite is not None:
             command.append(f'--rwmixwrite={rwmixwrite}')
 
-        # Print the command being executed
-        print(f"Executing command: {' '.join(command)}")
-        
         try:
             subprocess.run(command, check=True, capture_output=True, text=True)
-            
-            # Check if the output file is empty before trying to load JSON
-            if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
-                raise Exception(f"FIO command executed but produced an empty or non-existent output file. Command: {' '.join(command)}")
-
-            # Read the file content and find the start of the JSON
             with open(output_file, 'r') as f:
-                content = f.read()
-                json_start = content.find('{')
-                if json_start == -1:
-                    raise Exception(f"FIO output does not contain valid JSON. Output:\n{content}")
-                json_data = json.loads(content[json_start:])
-
+                json_data = json.load(f)
             os.remove(output_file)
-            return json_data
+            
+            # Simplified parsing for the relevant metrics
+            job_data = json_data['jobs'][0]
+            self.results['read_throughput'] = job_data['read']['bw'] / 1024
+            self.results['write_throughput'] = job_data['write']['bw'] / 1024
+            self.results['latency'] = job_data['read']['lat_ns']['mean'] / 1000 if 'read' in job_data else job_data['write']['lat_ns']['mean'] / 1000
+            self.results['errors'] = job_data['error']
+            self.results['iops'] = job_data['read']['iops'] + job_data['write']['iops']
+
         except subprocess.CalledProcessError as e:
-            print(f"Error executing fio: {e.stderr}")
+            print(f"FIO command failed with error: {e.stderr}")
             raise
         except FileNotFoundError:
-            print(f"Error: fio executable not found at '{self.fio_path}'. Please check your PATH.")
+            print(f"FIO executable not found at {self.fio_path}. Please ensure it is installed and the path is correct.")
+            raise
+        except json.JSONDecodeError:
+            print(f"Failed to parse FIO JSON output from {output_file}.")
             raise
 
-    def run_qd_test(self, qd):
-        job_name = f"qd_test_iodepth_{qd}"
-        results = self._execute_fio_command(job_name, 'randread', '4k', '1g', qd, runtime=30)
-        job = results['jobs'][0]
-        self.results['iops'] = job['read']['iops']
-        self.results['latency'] = job['read']['lat_ns']['mean'] / 1000
-
     def run_rw_test(self, read_pct, write_pct, duration):
-        rw_type = 'randrw'
-        rwmixread = int(read_pct)
-        job_name = f"rw_test_{rwmixread}r"
-        
-        results = self._execute_fio_command(job_name, rw_type, '4k', '1g', 32, runtime=int(duration) * 60, rwmixread=rwmixread)
-        
-        job = results['jobs'][0]
-        self.results['read_throughput'] = job['read']['bw'] / 1024 / 1024
-        self.results['write_throughput'] = job['write']['bw'] / 1024 / 1024
-        self.results['latency'] = (job['read']['lat_ns']['mean'] + job['write']['lat_ns']['mean']) / 2000
+        job_name = f"rw_test_{read_pct}r_{write_pct}w"
+        runtime = duration * 60
+        self._execute_fio_command(job_name, 'randrw', '4k', 32, runtime, rwmixread=read_pct)
 
     def run_stress_test(self, percent, hours):
         job_name = f"stress_test_{percent}p_write"
-        rw_mix = 'randwrite' if int(percent) == 100 else 'randrw'
-        rwmixwrite = int(percent)
+        runtime = hours * 3600
         
-        results = self._execute_fio_command(job_name, rw_mix, '4k', '1g', 64, runtime=int(hours) * 3600, rwmixwrite=rwmixwrite)
-        
-        job = results['jobs'][0]
-        self.results['write_throughput'] = job['write']['bw'] / 1024 / 1024
-        self.results['errors'] = 0
+        if percent == 100:
+            rw_type = 'randwrite'
+            rwmixwrite = 100
+        else:
+            rw_type = 'randrw'
+            rwmixwrite = percent
+            
+        self._execute_fio_command(job_name, rw_type, '4k', 64, runtime, rwmixwrite=rwmixwrite)
 
     def run_vm_scaling_test(self, vm_count, read_pct, write_pct):
         job_name = f"vm_scaling_{vm_count}_vms"
-        rw_mix = 'randrw'
-        rwmixread = int(read_pct)
+        self._execute_fio_command(job_name, 'randrw', '4k', 32, 60, numjobs=vm_count, rwmixread=read_pct)
+
+    def run_qd_test(self, qd):
+        job_name = f"qd_test_{qd}"
+        self._execute_fio_command(job_name, 'randread', '4k', qd, 60)
+
+    def set_baseline(self, baseline_type):
+        # Dynamically sets a baseline by running a short test.
         
-        results = self._execute_fio_command(job_name, rw_mix, '4k', '1g', 32, runtime=60, numjobs=int(vm_count), rwmixread=rwmixread)
-        
-        total_latency = 0
-        for job in results['jobs']:
-            total_latency += (job['read']['lat_ns']['mean'] + job['write']['lat_ns']['mean']) / 2
-        
-        self.results['avg_latency'] = total_latency / int(vm_count) / 1000
+        print(f"Running short test to establish {baseline_type} baseline...")
+        if baseline_type == 'write_throughput':
+            self.run_stress_test(percent=100, hours=1) # The duration is handled by the test itself
+            self.baseline_throughput = self.results['write_throughput']
+        else:
+            raise ValueError("Unsupported baseline type.")
 
 """
 
