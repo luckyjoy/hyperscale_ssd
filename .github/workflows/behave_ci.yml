@@ -64,7 +64,7 @@ jobs:
           path: reports/${{ github.run_number }}/${{ matrix.os }}/
 
 
-update-history:
+  update-history:
     name: Update History and Deploy
     runs-on: ubuntu-latest
     needs: [test]
