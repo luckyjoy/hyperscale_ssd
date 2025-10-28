@@ -24,7 +24,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
 
     outputs:
-      test_outcome: ${{ steps.run_tests.outputs.test_outcome }}
+      test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }}
 
     steps:
       - name: Checkout repository
@@ -47,6 +47,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # Ensure 'jq' is installed for robust JSON generation on Linux
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y jq
+          fi
 
       - name: Run Behave Tests
         id: run_behave_tests
@@ -58,11 +63,13 @@ jobs:
           REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
           mkdir -p "$REPORT_DIR"
 
+          # Run tests and capture output
           behave --tags=@all --exclude "features/manual_tests" \
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_DIR/validation_report.html" --no-capture | tee /tmp/behave_output.txt
           TEST_EXIT_CODE=$?
 
+          # Determine the overall test result
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             if grep -q "failed" /tmp/behave_output.txt; then
               RESULT=UNSTABLE
@@ -76,6 +83,28 @@ jobs:
           echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
           echo "$RESULT" > "$REPORT_DIR/status.txt"
           echo "$(TZ='America/Los_Angeles' date)" > "$REPORT_DIR/timestamp.txt"
+          
+          # --- FIX FOR TREND GRAPH STATISTICS ---
+          # Parse the behave output to extract scenario counts for summary.json
+          STATS_LINE=$(grep 'scenarios\.' /tmp/behave_output.txt | tail -n 1)
+
+          PASSED_SCENARIOS=$(echo "$STATS_LINE" | grep -o '[0-9]\+ passed' | awk '{print $1}')
+          FAILED_SCENARIOS=$(echo "$STATS_LINE" | grep -o '[0-9]\+ failed' | awk '{print $1}')
+          
+          PASSED_COUNT=${PASSED_SCENARIOS:-0}
+          FAILED_COUNT=${FAILED_SCENARIOS:-0}
+
+          if [ "$RESULT" = "UNSTABLE" ]; then
+            BROKEN_COUNT=1
+          else
+            BROKEN_COUNT=0
+          fi
+
+          # ✅ FIX: Use 'jq' to generate the JSON object to avoid multi-line parsing errors
+          echo "{ \"statistic\": { \"passed\": ${PASSED_COUNT}, \"failed\": ${FAILED_COUNT}, \"broken\": ${BROKEN_COUNT} } }" | jq . > "$REPORT_DIR/summary.json"
+          
+          echo "Generated summary.json with Passed: ${PASSED_COUNT}, Failed: ${FAILED_COUNT}, Broken: ${BROKEN_COUNT}"
+          # --- END FIX ---
 
       - uses: actions/upload-artifact@v4
         with:
@@ -143,6 +172,7 @@ jobs:
             REPO_NAME="${GITHUB_REPOSITORY##*/}"
             echo "{\"name\":\"$OS\",\"type\":\"GitHub Actions\",\"url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\",\"reportUrl\":\"https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/latest/$OS/\",\"buildOrder\":\"${BUILD_NUMBER}\",\"buildName\":\"Build ${BUILD_NUMBER} ($OS)\",\"buildUrl\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" > "$RESULTS_DIR/executor.json"
 
+            cp -r reports/build-$OS/* "$REPORT_DIR_BUILD/" || true
             cp -r "$REPORT_DIR_BUILD"/* "$REPORT_DIR_LATEST/" || true
             date -u > "$REPORT_DIR_BUILD/build-info.txt"
             date -u > "$REPORT_DIR_LATEST/build-info.txt"
@@ -208,19 +238,20 @@ jobs:
           echo "</ul>" >> "$SITE_DIR/index.html"
 
           # Gather data for the chart (oldest to newest)
-          # Fix: Reads actual test statistics from Allure's summary.json
+          # Fix: Reads actual test statistics from summary.json
           for BUILD in $CHART_BUILDS; do
             TOTAL_PASS=0
             TOTAL_FAIL=0   
             TOTAL_UNSTABLE=0 
             
             for OS in ubuntu-latest windows-latest; do
-              SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/widgets/summary.json"
+              SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json" # Correct path to summary.json
               
               if [ -f "$SUMMARY_FILE" ]; then
+                # Now reading 'passed', 'failed', and 'broken' (for UNSTABLE)
                 PASS_COUNT=$(jq -r '.statistic.passed // 0' "$SUMMARY_FILE" 2>/dev/null)
                 FAIL_COUNT=$(jq -r '.statistic.failed // 0' "$SUMMARY_FILE" 2>/dev/null)
-                BROKEN_COUNT=$(jq -r '.statistic.broken // 0' "$SUMMARY_FILE" 2>/dev/null)
+                BROKEN_COUNT=$(jq -r '.statistic.broken // 0' "$SUMMARY_FILE" 2>/dev/null) 
 
                 TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
                 TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
