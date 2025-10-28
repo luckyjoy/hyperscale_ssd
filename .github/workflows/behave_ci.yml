@@ -92,10 +92,15 @@ jobs:
           name: validation-report-${{ matrix.os }}
           path: reports/${{ github.run_number }}/${{ matrix.os }}
 
-  build_summary:
+  report:
     name: Generate History + Trend + Deploy
     needs: [test]
     runs-on: ubuntu-latest
+    env:
+      SITE_DIR: site
+      TIMEZONE: America/Los_Angeles
+      RESULT: ${{ needs.test.outputs.test_outcome }}   # ✅ FIX: Propagate test result to env
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -107,7 +112,7 @@ jobs:
           python -m pip install jinja2 matplotlib pytz
 
       - name: Setup site directories
-        run: mkdir -p ${{ env.SITE_DIR }}/latest
+        run: mkdir -p $SITE_DIR/latest
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -117,17 +122,17 @@ jobs:
       - name: Organize reports
         run: |
           for os in ubuntu-latest windows-latest; do
-            mkdir -p "${{ env.SITE_DIR }}/latest/$os"
+            mkdir -p "$SITE_DIR/latest/$os"
             if [ -d "artifacts/validation-report-$os" ]; then
-              cp -r artifacts/validation-report-$os/* "${{ env.SITE_DIR }}/latest/$os/"
+              cp -r artifacts/validation-report-$os/* "$SITE_DIR/latest/$os/"
             fi
           done
-          cp artifacts/timestamp-*/*.txt "${{ env.SITE_DIR }}/latest/" || true
+          cp artifacts/timestamp-*/*.txt "$SITE_DIR/latest/" || true
 
       - name: Generate History and Trend Page
         run: |
-          mkdir -p ${{ env.SITE_DIR }}
-          HISTORY_FILE="${{ env.SITE_DIR }}/history.json"
+          mkdir -p $SITE_DIR
+          HISTORY_FILE="$SITE_DIR/history.json"
 
           python - <<'PYCODE'
           import json, os, datetime, pytz, matplotlib.pyplot as plt
@@ -135,50 +140,72 @@ jobs:
 
           site_dir = os.environ["SITE_DIR"]
           history_file = os.path.join(site_dir, "history.json")
-          tz = pytz.timezone("America/Los_Angeles")
+          tz = pytz.timezone(os.environ.get("TIMEZONE", "America/Los_Angeles"))
           now_pdt = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
 
+          result = os.environ.get("RESULT", "UNKNOWN")
+          build = int(os.getenv("GITHUB_RUN_NUMBER", "0"))
+
+          # ✅ FIX: Skip adding UNKNOWN results if no tests were run
+          if result == "UNKNOWN":
+              print(f"⚠️  No test result found for Build #{build}, defaulting to FAIL.")
+              result = "FAIL"
+
           new_entry = {
-              "build": int(os.getenv("GITHUB_RUN_NUMBER", "0")),
-              "result": os.getenv("RESULT", "UNKNOWN"),
-              "timestamp": now_pdt,
+              "build": build,
+              "result": result,
+              "timestamp": now_pdt
           }
 
+          # Keep previous history
           if os.path.exists(history_file):
               data = json.load(open(history_file))
+              # Remove duplicates for same build
+              data = [d for d in data if d["build"] != build]
           else:
               data = []
+
           data.append(new_entry)
+          data.sort(key=lambda x: x["build"])
+
           with open(history_file, "w") as f:
               json.dump(data, f, indent=2)
 
-          # Build trend data
-          results = [d["result"] for d in data]
-          total = len(results)
-          pass_count = results.count("PASS")
-          fail_count = results.count("FAIL")
-          unstable_count = results.count("UNSTABLE")
+          # Prepare trend counts
+          pass_count = sum(1 for d in data if d["result"] == "PASS")
+          fail_count = sum(1 for d in data if d["result"] == "FAIL")
+          unstable_count = sum(1 for d in data if d["result"] == "UNSTABLE")
 
           plt.figure(figsize=(6,4))
-          plt.bar(["PASS","FAIL","UNSTABLE"], [pass_count, fail_count, unstable_count])
-          plt.title(f"Build Trend (Total {total})")
+          plt.bar(["PASS","FAIL","UNSTABLE"], [pass_count, fail_count, unstable_count],
+                  color=["green","red","orange"])
+          plt.title(f"Build Trend (Total {len(data)})")
           plt.ylabel("Count")
           plt.tight_layout()
           plt.savefig(os.path.join(site_dir, "trend_chart.svg"), format="svg")
 
-          # Generate HTML history page
+          # Build HTML table
           template = Template("""
-          <html><head><title>Hyperscale SSD Build History</title></head><body>
+          <html><head><title>Hyperscale SSD Build History</title></head>
+          <body style="font-family:sans-serif;margin:20px;">
           <h2>🤖 Hyperscale SSD Framework CI/CD Build History</h2>
           <p><b>Last updated:</b> {{ now_pdt }}</p>
+          <h3>📜 Build History</h3>
           <table border="1" cellpadding="5" cellspacing="0">
-          <tr><th>Build #</th><th>Result</th><th>Timestamp</th></tr>
-          {% for e in history %}
-            <tr><td>{{e.build}}</td><td>{{e.result}}</td><td>{{e.timestamp}}</td></tr>
-          {% endfor %}
+            <tr><th>Build #</th><th>Result</th><th>Timestamp (PDT)</th></tr>
+            {% for e in history %}
+              <tr>
+                <td>{{ e.build }}</td>
+                <td style="color:{% if e.result=='PASS' %}green{% elif e.result=='UNSTABLE' %}orange{% else %}red{% endif %};font-weight:bold;">
+                  {{ e.result }}
+                </td>
+                <td>{{ e.timestamp }}</td>
+              </tr>
+            {% endfor %}
           </table>
           <h3>📊 Trend Chart</h3>
           <img src="trend_chart.svg" width="600"/>
+          <p><em>Generated automatically on {{ now_pdt }}</em></p>
           </body></html>
           """)
           with open(os.path.join(site_dir, "history.html"), "w") as f:
@@ -198,21 +225,14 @@ jobs:
         if: always()
         run: |
           PAGE_URL="${{ steps.deployment.outputs.page_url }}"
+          RESULT="${{ env.RESULT }}"
           echo "### 💾 Hyperscale SSD Framework CI/CD Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**🕒 PDT Time:** $(cat ${{ env.SITE_DIR }}/latest/timestamp_pdt.txt 2>/dev/null || echo 'Unavailable')" >> $GITHUB_STEP_SUMMARY
+          echo "**Build #${{ github.run_number }} Result:** $RESULT" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "🧩 **Latest Reports**" >> $GITHUB_STEP_SUMMARY
-          for os in ubuntu-latest windows-latest; do
-            if [ -f "${{ env.SITE_DIR }}/latest/$os/validation_report.html" ]; then
-              echo "- $os: [View Report](${PAGE_URL}/latest/$os/validation_report.html)" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "- $os: (No report found)" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📜 **Build History** ([Open History Page](${PAGE_URL}/history.html))" >> $GITHUB_STEP_SUMMARY
-          jq -r '.[] | "- Build #\(.build) (\(.result)) — \(.timestamp)"' ${{ env.SITE_DIR }}/history.json >> $GITHUB_STEP_SUMMARY
+          echo "[![Ubuntu Report](https://img.shields.io/badge/Ubuntu-Latest-blue)](${PAGE_URL}/latest/ubuntu-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Windows Report](https://img.shields.io/badge/Windows-Latest-blue)](${PAGE_URL}/latest/windows-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![History](https://img.shields.io/badge/View-History-green)](${PAGE_URL}/history.html)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "📊 **Trend Chart**" >> $GITHUB_STEP_SUMMARY
           echo "<img src='${PAGE_URL}/trend_chart.svg' width='600'/>" >> $GITHUB_STEP_SUMMARY
