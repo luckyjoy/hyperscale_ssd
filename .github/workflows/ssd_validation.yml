@@ -13,12 +13,14 @@ permissions:
 
 env:
   SITE_DIR: site
+  REPORT_FILE_NAME: validation_report.html # Define standard report name
 
 jobs:
   test:
     name: Run Behave Tests on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false # Ensure Windows and Ubuntu run even if one fails
       matrix:
         os: [ubuntu-latest, windows-latest]
 
@@ -26,8 +28,11 @@ jobs:
       test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }}
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -35,54 +40,58 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install behave-html-pretty-formatter
+          # Install Behave and the HTML formatter
+          pip install behave behave-html-pretty-formatter
 
-      - name: Run Behave Tests
+      - name: Run Behave Tests & Capture Reports
         id: run_behave_tests
         shell: bash
         run: |
-          set +e
-          OS_NAME=${{ matrix.os }}
-          BUILD_NUMBER=${{ github.run_number }}
-          REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
-          REPORT_PATH="$REPORT_DIR/validation_report.html"
-          STATS_FILE="$REPORT_DIR/stats.txt"
-
+          set +e # Do not fail the step immediately on test failures
+          
+          REPORT_DIR="current-reports"
           mkdir -p "$REPORT_DIR"
+          REPORT_PATH="$REPORT_DIR/${{ env.REPORT_FILE_NAME }}"
+          STATS_FILE="$REPORT_DIR/stats.txt"
+          
+          echo "Running behave tests..."
+          # Run Behave and pipe output to a file
           behave --tags=@adv --exclude "features/manual_tests" \
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_PATH" --no-capture | tee /tmp/behave_output.txt
+          
           TEST_EXIT_CODE=$?
+          
+          # Extract features summary line (e.g., "Features: 3 passed, 1 failed, 0 skipped...")
+          grep 'Features:' /tmp/behave_output.txt | sed 's/Features: //' > "$STATS_FILE" || true
 
-          grep 'Features:' /tmp/behave_output.txt | sed 's/Features: //' > "$STATS_FILE"
-
+          # Determine outcome for output variable
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             if grep -q "failed" /tmp/behave_output.txt; then
                 RESULT=UNSTABLE
             else
-                RESULT=FAIL
+                RESULT=FAIL # Config or setup error
             fi
           else
             RESULT=PASS
           fi
+          
           echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
-          exit 0
+          
+          # Create timestamp file in the reports directory
+          date -u > "$REPORT_DIR/build-info.txt"
 
-      - name: Create Timestamp
-        run: echo "$(date -u)" > timestamp.txt
-
-      - uses: actions/upload-artifact@v4
+      # Upload a single artifact containing the report, stats, and timestamp for the dashboard
+      - name: Upload Current Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: timestamp-${{ matrix.os }}
-          path: timestamp.txt
+          name: current-build-reports
+          path: current-reports/
+          retention-days: 7
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: validation-report-${{ matrix.os }}
-          path: reports/${{ github.run_number }}/${{ matrix.os }}
 
-  build_dashboard:
-    name: Build Dashboard
+  report:
+    name: Build Dashboard & Deploy
     runs-on: ubuntu-latest
     needs: test
 
@@ -90,123 +99,130 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download previous artifacts
+      # 1. Download previous site artifacts (historical data)
+      - name: Download Historical Artifacts
         uses: actions/download-artifact@v4
         with:
-          path: site
+          name: site
+          path: ${{ env.SITE_DIR }}
+          
+      # 2. Download current build artifacts
+      - name: Download Current Build Reports
+        uses: actions/download-artifact@v4
+        with:
+          name: current-build-reports
+          path: current-reports/
+
+      - name: Organize Reports and Rebuild Site Structure
+        shell: bash
+        run: |
+          SITE_DIR="${{ env.SITE_DIR }}"
+          REPORT_NAME="${{ env.REPORT_FILE_NAME }}"
+          CURRENT_BUILD="${{ github.run_number }}"
+          
+          # Ensure SITE_DIR exists
+          mkdir -p "$SITE_DIR"
+          
+          # --- Process and integrate current build reports ---
+          # Since the upload/download process is consistent, we trust the files are in current-reports/
+          
+          for OS in ubuntu-latest windows-latest; do
+            # Define target directories
+            TARGET_DIR="$SITE_DIR/$CURRENT_BUILD/$OS"
+            LATEST_DIR="$SITE_DIR/latest/$OS"
+            
+            # Create historical and latest directories
+            mkdir -p "$TARGET_DIR"
+            mkdir -p "$LATEST_DIR"
+
+            # Check if current build files exist. Since the 'test' job uploads the same files 
+            # for both OSes (as the output is overwritten), we check for the files once and copy 
+            # them into the structure for both OSes.
+            if [ -f "current-reports/stats.txt" ]; then
+                
+                # Copy to Historical Folder
+                cp current-reports/${REPORT_NAME} "$TARGET_DIR/" || true
+                cp current-reports/stats.txt "$TARGET_DIR/" || true
+                cp current-reports/build-info.txt "$TARGET_DIR/" || true
+
+                # Copy to Latest Pointer Folder
+                cp current-reports/${REPORT_NAME} "$LATEST_DIR/" || true
+                cp current-reports/stats.txt "$LATEST_DIR/" || true
+                cp current-reports/build-info.txt "$LATEST_DIR/" || true
+            fi
+          done
+
 
       - name: Rebuild index.html with Trend Charts
         shell: bash
         run: |
-          SITE_DIR="site"
+          SITE_DIR="${{ env.SITE_DIR }}"
+          REPORT_NAME="${{ env.REPORT_FILE_NAME }}"
           CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
-          mkdir -p "$SITE_DIR"
-
-          echo "<html><head><title>Hyperscale SSD Framework Reports History</title>
-          <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
-          <style>
-          body{font-family:sans-serif;margin:20px;}
-          ul{list-style:none;padding:0;}
-          li{margin:6px 0;}
-          a{text-decoration:none;color:#0366d6;}
-          a:hover{text-decoration:underline;}
-          #chart-container{max-width:600px;max-height:300px;margin:0;}
-          </style></head><body>
-          <h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>
-          <h2>🧩 Latest Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
+          
+          # --- Start HTML Generation using printf to safely initialize the file (No Here Document) ---
+          printf "<html>\n<head>\n<title>Hyperscale SSD Framework Reports History</title>\n<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>\n<style>\nbody{font-family:sans-serif;margin:20px;}\nul{list-style:none;padding:0;}\nli{margin:6px 0;}\na{text-decoration:none;color:#0366d6;}\na:hover{text-decoration:underline;}\n#chart-container{max-width:600px;max-height:300px;margin:0;}\n</style>\n</head>\n<body>\n<h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>\n<h2>🧩 Latest Reports (HTML)</h2>\n<hr>\n<ul>\n" > "$SITE_DIR/index.html"
 
           for OS in ubuntu-latest windows-latest; do
             if [ -d "$SITE_DIR/latest/$OS" ]; then
               TS_UTC=$(cat "$SITE_DIR/latest/$OS/build-info.txt" 2>/dev/null || echo "")
               TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "$TS_UTC")
-              echo "<li><strong><a href='latest/$OS/report.json'>Latest Report ($OS)</a></strong> - Last run: $TS_DISPLAY</li>" >> "$SITE_DIR/index.html"
+              echo "<li><strong><a href='latest/$OS/${REPORT_NAME}'>Latest Report ($OS)</a></strong> - Last run: $TS_DISPLAY</li>" >> "$SITE_DIR/index.html"
             else
               echo "<li><strong>$OS:</strong> (No report found)</li>" >> "$SITE_DIR/index.html"
             fi
           done
 
-          echo "</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2>" >> "$SITE_DIR/index.html"
-          BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr)
+          echo "</ul>" >> "$SITE_DIR/index.html"
+          echo "<hr>" >> "$SITE_DIR/index.html"
+          echo "<h2>📊 Report History & Trends (Times in PDT)</h2>" >> "$SITE_DIR/index.html"
           echo "<ul>" >> "$SITE_DIR/index.html"
-
+          
+          BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr)
+          
           CHART_BUILDS=$(echo "$BUILDS" | sort -n)
           LABELS=""
           PASS_COUNTS=""
           FAIL_COUNTS=""
-          UNSTABLE_COUNTS=""
 
           for BUILD in $BUILDS; do
+            # Use Ubuntu's info for the build timestamp
             TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "")
             TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
-            echo "<li><strong>Build #${BUILD}</strong> (Run: $TS_DISPLAY) - <a href='${BUILD}/ubuntu-latest/report.json'>Ubuntu</a> / <a href='${BUILD}/windows-latest/report.json'>Windows</a></li>" >> "$SITE_DIR/index.html"
+            echo "<li><strong>Build #${BUILD}</strong> (Run: $TS_DISPLAY) - <a href='${BUILD}/ubuntu-latest/${REPORT_NAME}'>Ubuntu</a> / <a href='${BUILD}/windows-latest/${REPORT_NAME}'>Windows</a></li>" >> "$SITE_DIR/index.html"
           done
 
           echo "</ul>" >> "$SITE_DIR/index.html"
 
+          # --- Chart Data Generation (Parsing stats.txt) ---
           for BUILD in $CHART_BUILDS; do
             TOTAL_PASS=0
             TOTAL_FAIL=0
-            TOTAL_UNSTABLE=0
-
+            
             for OS in ubuntu-latest windows-latest; do
-              REPORT_FILE="$SITE_DIR/$BUILD/$OS/report.json"
-              if [ -f "$REPORT_FILE" ]; then
-                PASS=$(jq '.summary.passed' "$REPORT_FILE" 2>/dev/null || echo 0)
-                FAIL=$(jq '.summary.failed' "$REPORT_FILE" 2>/dev/null || echo 0)
-                ERROR=$(jq '.summary.errors' "$REPORT_FILE" 2>/dev/null || echo 0)
-
+              STATS_FILE="$SITE_DIR/$BUILD/$OS/stats.txt"
+              if [ -f "$STATS_FILE" ]; then
+                # Example stats.txt content (after sed): 3 passed, 1 failed, 0 skipped, 0 untested, 0 broken
+                # Extracting passed features/scenarios (first number)
+                PASS=$(grep -oE '^[0-9]+ passed' "$STATS_FILE" | awk '{print $1}' || echo 0)
+                # Extracting failed features/scenarios
+                FAIL=$(grep -oE '[0-9]+ failed' "$STATS_FILE" | awk '{print $1}' || echo 0)
+                
                 TOTAL_PASS=$((TOTAL_PASS + PASS))
                 TOTAL_FAIL=$((TOTAL_FAIL + FAIL))
-                TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + ERROR))
               fi
             done
 
             LABELS="$LABELS'$BUILD',"
             PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
             FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
-            UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
           done
-
-          echo "<div id='chart-container'><canvas id='trendChart'></canvas></div>
-          <script>
-          const ctx = document.getElementById('trendChart').getContext('2d');
-          new Chart(ctx, {
-            type: 'line',
-            data: {
-              labels: [${LABELS%,}],
-              datasets: [
-                {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', fill: false},
-                {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', fill: false},
-                {label: 'UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
-              ]
-            },
-            options: {responsive:true, maintainAspectRatio:false,
-              plugins:{legend:{position:'top'}},
-              scales:{
-                y:{beginAtZero:true, title:{display:true, text:'Total Tests'}},
-                x:{title:{display:true, text:'Build Number'}}
-              }
-            }
-          });
-          </script>
-          <hr><p><em>Generated on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ${{ env.SITE_DIR }}
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-
-      - name: Workflow summary with badges
-        if: always()
-        run: |
-          PAGE_URL="${{ steps.deployment.outputs.page_url }}"
-          echo "### 💾 Hyperscale SSD Framework CI/CD Summary" >> $GITHUB_STEP_SUMMARY
-          echo "[![Ubuntu Report](https://img.shields.io/badge/Ubuntu-Latest-blue)](${PAGE_URL}/latest/ubuntu-latest/report.json)" >> $GITHUB_STEP_SUMMARY
-          echo "[![Windows Report](https://img.shields.io/badge/Windows-Latest-blue)](${PAGE_URL}/latest/windows-latest/report.json)" >> $GITHUB_STEP_SUMMARY
-          echo "[![History](https://img.shields.io/badge/View-History-green)](${PAGE_URL}/)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Build #${{ github.run_number }} Result:** ${{ needs.test.outputs.test_outcome }}" >> $GITHUB_STEP_SUMMARY
+          
+          # --- Final Chart JS injection using printf (No Here Document) ---
+          # Clean the trailing commas from the lists.
+          LABELS_CLEAN=${LABELS%,}
+          PASS_CLEAN=${PASS_COUNTS%,}
+          FAIL_CLEAN=${FAIL_COUNTS%,}
+          
+          printf "<div id='chart-container'><canvas id='trendChart'></canvas></div>\n<script>\nconst ctx = document.getElementById('trendChart').getContext('2d');\nnew Chart(ctx, {\n  type: 'line',\n  data: {\n    labels: [%s],\n    datasets: [\n      {label: 'PASS (Features/Scenarios)', data: [%s], borderColor: 'green', backgroundColor: 'rgba(0, 128, 0, 0.1)', fill: false, tension: 0.2},\n      {label: 'FAIL (Features/Scenarios)', data: [%s], borderColor: 'red', backgroundColor: 'rgba(255, 0, 0, 0.1)', fill: false, tension: 0.2}\n    ]\n  },\n  options: {responsive:true, maintainAspectRatio:false,\n    plugins:{legend:{position:'top'}},\n    scales:{\n      y:{beginAtZero:true, title:{display:true, text:'Total Features/Scenarios'}},\n      x:{title:{display:true, text:'Build Number'}}\n    }\n  }\n});\n</script>\n<hr><p><em>Generated on %s</em></p></body></html>\n" \
+            "${LABELS_CLEAN}" "${PASS_CLEAN}" "${FAIL_CLEAN}" "${CURRENT_LA_TIME}" >> "$SITE_DIR/index.html"
