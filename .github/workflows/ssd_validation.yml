@@ -1,5 +1,6 @@
 name: SSD Hyperscale Automation Framework By Bang Thien Nguyen
 
+# Triggers for the workflow
 on:
   push:
     branches: [ main ]
@@ -9,7 +10,7 @@ on:
     # Runs at 1:00 AM PT every day.
     - cron: '0 8 * * *'
 
-# Grant permissions to write to contents and pages for deploying the report
+# Grant permissions for deployment
 permissions:
   contents: write
   pages: write
@@ -22,7 +23,6 @@ env:
 jobs:
   test:
     name: Run Behave Tests on ${{ matrix.os }}
-    shell: bash
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -45,36 +45,46 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # The formatter is needed for the report generation
           pip install behave-html-pretty-formatter
 
       - name: Run Behave Tests
         id: run_behave_tests
+        # FIX: Explicitly set shell to bash to ensure 'mkdir -p' works on Windows and Ubuntu
         shell: bash
         run: |
           set +e
           OS_NAME=${{ matrix.os }}
           BUILD_NUMBER=${{ github.run_number }}
           # Path for the report (relative to the runner's workspace)
-          REPORT_PATH="reports/$BUILD_NUMBER/$OS_NAME/validation_report.html"
-          mkdir -p "$(dirname $REPORT_PATH)"
+          REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
+          REPORT_PATH="$REPORT_DIR/validation_report.html"
+          STATS_FILE="$REPORT_DIR/stats.txt"
 
-          # Run Behave and output to the build-specific path
-          # We use --no-capture so we can analyze the output for PASS/FAIL
-          behave --tags=@adv --exclude "features/manual_tests" --format behave_html_pretty_formatter:PrettyHTMLFormatter -o "$REPORT_PATH" --no-capture
+          # 1. Create the necessary directory structure
+          mkdir -p "$REPORT_DIR"
+
+          # 2. Run Behave and output to the build-specific path
+          # We use --no-capture so we can capture the output for the test status
+          # And we pipe the summary to a stats file for trend analysis later
+          behave --tags=@adv --exclude "features/manual_tests" --format behave_html_pretty_formatter:PrettyHTMLFormatter -o "$REPORT_PATH" --no-capture | tee /tmp/behave_output.txt
           TEST_EXIT_CODE=$?
           
-          # Logic to determine test outcome (0=PASS, >0=FAIL/UNSTABLE)
+          # 3. Extract simple statistics for trend analysis
+          # Extract the summary line and clean it up (adjust parsing based on actual formatter output if needed)
+          grep 'Features:' /tmp/behave_output.txt | sed 's/Features: //' > "$STATS_FILE"
+          
+          # 4. Logic to determine test outcome (0=PASS, >0=FAIL/UNSTABLE)
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             echo "⚠️ Some tests failed (Behave exit code $TEST_EXIT_CODE)."
-            # Check for a specific 'Failures:' string in the output (Behave's summary)
-            if grep -q "Failures:" "$REPORT_PATH"; then
+            # Check for actual failures vs. setup/config issues
+            if grep -q "failed" /tmp/behave_output.txt; then
                 echo "test_outcome=UNSTABLE" >> $GITHUB_OUTPUT
             else
-                # If exit code is not 0 but no 'Failures:' found, treat as a setup fail
+                # Treat non-zero exit code without explicit failures as a setup/config failure
                 echo "test_outcome=FAIL" >> $GITHUB_OUTPUT
             fi
-            # Always exit successfully here so subsequent steps (artifact upload) still run
-            exit 0
+            exit 0 # Exit 0 so subsequent steps (artifact upload) still run
           else
             echo "✅ All tests passed successfully."
             echo "test_outcome=PASS" >> $GITHUB_OUTPUT
@@ -83,9 +93,10 @@ jobs:
 
       - name: Get Build Timestamp
         id: get_timestamp
+        # Use UTC time for consistency
         run: echo "TIMESTAMP=$(date -u)" >> $GITHUB_OUTPUT
 
-      # Upload the *entire* build-specific report folder for the report job
+      # Upload the *entire* build-specific report folder (includes HTML and stats.txt)
       - name: Upload Test Report Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -100,11 +111,10 @@ jobs:
           name: timestamp-${{ matrix.os }}
           path: .
           retention-days: 7
-          # Create a dummy file with the timestamp for simplicity
           if-no-files-found: ignore
         run: echo "${{ steps.get_timestamp.outputs.TIMESTAMP }}" > timestamp.txt
 
-  ---
+---
   report:
     name: Generate History Dashboard & Deploy
     runs-on: ubuntu-latest
@@ -114,7 +124,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Fix: Dynamically find the workflow filename.
+      # Get workflow filename for artifact download
       - name: Get workflow filename
         id: get_workflow_name
         run: echo "WORKFLOW_FILE=$(basename .github/workflows/*.yml)" >> $GITHUB_ENV
@@ -132,17 +142,20 @@ jobs:
       - name: Restore Previous History
         shell: bash
         run: |
-          mkdir -p "${{ env.SITE_DIR }}"
+          SITE_DIR="${{ env.SITE_DIR }}"
+          BUILD_NUMBER=${{ github.run_number }}
+          mkdir -p "$SITE_DIR"
+          
           if [ -d "previous-site" ]; then
             echo "♻️ Restoring previous site history..."
-            # Restore all previous builds
-            cp -r previous-site/* "${{ env.SITE_DIR }}/" || true
-            # Clean up the old report links, only keeping the history files
-            find "${{ env.SITE_DIR }}" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | while read BUILD_NUM; do
-              rm -rf "${{ env.SITE_DIR }}/$BUILD_NUM/ubuntu-latest" 2>/dev/null || true
-              rm -rf "${{ env.SITE_DIR }}/$BUILD_NUM/windows-latest" 2>/dev/null || true
-            done
+            # Restore all previous builds. The new run will overwrite its own build directory.
+            cp -r previous-site/* "$SITE_DIR/" || true
+            # Delete any 'latest' directory from the previous history to be rebuilt
+            rm -rf "$SITE_DIR/latest" 2>/dev/null || true
           fi
+          
+          # Create current build dir to receive downloaded artifacts
+          mkdir -p "$SITE_DIR/$BUILD_NUMBER"
 
       # Download current build reports
       - name: Download Current Test Reports
@@ -156,7 +169,6 @@ jobs:
           path: timestamps
           pattern: timestamp-*
 
-      # Extract build reports and metadata into the SITE_DIR
       - name: Organize Reports and Extract Metadata
         shell: bash
         run: |
@@ -164,34 +176,21 @@ jobs:
           BUILD_NUMBER=${{ github.run_number }}
           CURRENT_BUILD_DIR="$SITE_DIR/$BUILD_NUMBER"
 
-          # Create directory for the current build
-          mkdir -p "$CURRENT_BUILD_DIR"
-
           for OS in ubuntu-latest windows-latest; do
             OS_DIR="$CURRENT_BUILD_DIR/$OS"
             REPORT_ARTIFACT_NAME="validation-report-$OS"
             TIMESTAMP_ARTIFACT_NAME="timestamp-$OS"
             
-            # Move report files into the build directory
-            # The downloaded report artifact structure is reports/$BUILD_NUMBER/$OS/*
+            # 1. Move report files into the build directory
+            mkdir -p "$OS_DIR"
             if [ -d "reports/$REPORT_ARTIFACT_NAME" ]; then
+                # Move the entire artifact content (validation_report.html and stats.txt)
                 cp -r reports/$REPORT_ARTIFACT_NAME/* "$OS_DIR"
             fi
             
-            # Extract timestamp
+            # 2. Extract timestamp
             TIMESTAMP=$(cat "timestamps/$TIMESTAMP_ARTIFACT_NAME/timestamp.txt" 2>/dev/null || echo "$(date -u)")
             echo "$TIMESTAMP" > "$OS_DIR/build-info.txt"
-            
-            # Extract test statistics from the report HTML for the trend chart
-            REPORT_FILE="$OS_DIR/validation_report.html"
-            if [ -f "$REPORT_FILE" ]; then
-              # Use grep/awk to parse the summary from the Behave report.
-              # This assumes the Behave HTML report contains a summary line like: "Features: X passed, Y failed, Z skipped"
-              # NOTE: The exact parsing will depend on the *exact* output of behave-html-pretty-formatter
-              # For demonstration, we'll use a simplified grep:
-              SUMMARY_LINE=$(grep -E 'Features:|Scenarios:|Steps:' "$REPORT_FILE" | head -1 | sed 's/<[^>]*>//g')
-              echo "$SUMMARY_LINE" > "$OS_DIR/stats.txt"
-            fi
           done
 
       - name: Generate Index.html History Dashboard
@@ -211,8 +210,8 @@ jobs:
           a{text-decoration:none;color:#0366d6;}
           a:hover{text-decoration:underline;}
           #chart-container {
-            max-width: 600px;
-            max-height: 300px;
+            max-width: 800px;
+            max-height: 400px;
             margin: 0;
           }
           </style></head><body>
@@ -245,6 +244,7 @@ jobs:
           
           # Generate the visible list of links (newest to oldest) and gather data for the chart
           for BUILD in $BUILDS; do
+            # Get timestamp from the Ubuntu build as the representative time
             TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "")
             TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
 
@@ -253,20 +253,18 @@ jobs:
           echo "</ul>" >> "$SITE_DIR/index.html"
           
           # Gather data for the chart (oldest to newest)
-          # NOTE: Parsing the Behave HTML report for stats is complex. 
-          # This is a placeholder that requires refinement based on your specific report's HTML structure.
-          # For a basic example, we will check the 'stats.txt' created earlier.
           for BUILD in $CHART_BUILDS; do
             TOTAL_PASS=0
             TOTAL_FAIL=0
             
+            # Aggregate stats from both OS runs
             for OS in ubuntu-latest windows-latest; do
               STATS_FILE="$SITE_DIR/$BUILD/$OS/stats.txt"
               if [ -f "$STATS_FILE" ]; then
-                # Example simplified parsing. Adjust as necessary for your 'stats.txt' content.
-                # Assuming stats.txt has a line like: "Features: 1 passed, 0 failed, 0 skipped"
-                PASS_COUNT=$(grep "Features:" "$STATS_FILE" | awk '{print $2}' | tr -d ',')
-                FAIL_COUNT=$(grep "Features:" "$STATS_FILE" | awk '{print $4}' | tr -d ',')
+                # Example parsing based on Behave's summary format (e.g., 'X passed, Y failed, Z skipped')
+                # Find the numbers for passed and failed.
+                PASS_COUNT=$(grep -oE '[0-9]+ passed' "$STATS_FILE" | awk '{print $1}')
+                FAIL_COUNT=$(grep -oE '[0-9]+ failed' "$STATS_FILE" | awk '{print $1}')
                 
                 TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
                 TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
@@ -289,8 +287,8 @@ jobs:
             data: {
               labels: [${LABELS%,}],
               datasets: [
-                {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', backgroundColor: 'rgba(0, 128, 0, 0.2)', fill: true},
-                {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', backgroundColor: 'rgba(255, 0, 0, 0.2)', fill: true}
+                {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', backgroundColor: 'rgba(0, 128, 0, 0.2)', fill: false},
+                {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', backgroundColor: 'rgba(255, 0, 0, 0.2)', fill: false}
               ]
             },
             options: {
@@ -300,8 +298,7 @@ jobs:
               scales: {
                 y: {
                   beginAtZero: true,
-                  stepSize: 1,
-                  title: { display: true, text: 'Total Passed Features' }
+                  title: { display: true, text: 'Total Passed Features/Scenarios' }
                 },
                 x: {
                   title: { display: true, text: 'Build Number' }
