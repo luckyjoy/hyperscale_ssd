@@ -22,6 +22,7 @@ env:
 jobs:
   test:
     name: Run Behave Tests on ${{ matrix.os }}
+    shell: bash
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
