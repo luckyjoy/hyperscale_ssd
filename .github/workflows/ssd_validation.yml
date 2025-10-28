@@ -1,28 +1,24 @@
 name: SSD Hyperscale Automation Framework By Bang Thien Nguyen
 
-# Triggers for the workflow
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
   schedule:
-    # Runs at 1:00 AM PT every day.
-    - cron: '0 8 * * *'
+    - cron: '0 8 * * *'  # 1:00 AM PT daily
 
-# 🔑 CRUCIAL: Grants permissions needed for deploying to GitHub Pages
 permissions:
   contents: write
   pages: write
   id-token: write
 
 env:
-  # Directory where the site will be built
   SITE_DIR: site
+  HISTORY_FILE: site/history.json
 
 jobs:
-  # Job 1: Runs tests on matrix OSes and uploads artifacts
-  test: 
+  test:
     name: Run Behave Tests on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -33,11 +29,8 @@ jobs:
       test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -49,7 +42,6 @@ jobs:
 
       - name: Run Behave Tests
         id: run_behave_tests
-        # FIX: Use bash shell for cross-platform compatibility
         shell: bash
         run: |
           set +e
@@ -60,107 +52,128 @@ jobs:
           STATS_FILE="$REPORT_DIR/stats.txt"
 
           mkdir -p "$REPORT_DIR"
-
-          behave --tags=@adv --exclude "features/manual_tests" --format behave_html_pretty_formatter:PrettyHTMLFormatter -o "$REPORT_PATH" --no-capture | tee /tmp/behave_output.txt
+          behave --tags=@adv --exclude "features/manual_tests" \
+            --format behave_html_pretty_formatter:PrettyHTMLFormatter \
+            -o "$REPORT_PATH" --no-capture | tee /tmp/behave_output.txt
           TEST_EXIT_CODE=$?
-          
+
           grep 'Features:' /tmp/behave_output.txt | sed 's/Features: //' > "$STATS_FILE"
-          
+
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             if grep -q "failed" /tmp/behave_output.txt; then
-                echo "test_outcome=UNSTABLE" >> $GITHUB_OUTPUT
+                RESULT=UNSTABLE
             else
-                echo "test_outcome=FAIL" >> $GITHUB_OUTPUT
+                RESULT=FAIL
             fi
-            exit 0
           else
-            echo "test_outcome=PASS" >> $GITHUB_OUTPUT
-            exit 0
+            RESULT=PASS
           fi
+          echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
+          exit 0
 
-      - name: Get Build Timestamp
-        id: get_timestamp
-        run: echo "TIMESTAMP=$(date -u)" >> $GITHUB_OUTPUT
+      - name: Create Timestamp
+        run: echo "$(date -u)" > timestamp.txt
 
-      - name: Create Timestamp File
-        id: create_timestamp_file
-        shell: bash
-        run: echo "${{ steps.get_timestamp.outputs.TIMESTAMP }}" > timestamp.txt
-          
-      - name: Upload Timestamp Artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: timestamp-${{ matrix.os }}
           path: timestamp.txt
-          retention-days: 7
-          if-no-files-found: ignore
-          
-      - name: Upload Test Report Artifact
-        uses: actions/upload-artifact@v4
+
+      - uses: actions/upload-artifact@v4
         with:
           name: validation-report-${{ matrix.os }}
           path: reports/${{ github.run_number }}/${{ matrix.os }}
-          retention-days: 7
 
-  # Job 2: Generates Dashboard and Deploys
   report:
     name: Generate History Dashboard & Deploy
     runs-on: ubuntu-latest
-    needs: test 
+    needs: test
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     permissions:
       contents: write
       pages: write
       id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # 👇 Restore previous history, collect artifacts, generate dashboard
-      - name: Download All Artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Build History Dashboard
-        shell: bash
+      - name: Restore existing history (if any)
         run: |
-          mkdir -p site
-          echo "<html><head><title>SSD Hyperscale Automation Framework</title></head><body>" > site/index.html
-          echo "<h1>💾 SSD Hyperscale Automation Framework Build History</h1>" >> site/index.html
-          echo "<p><strong>Author:</strong> Bang Thien Nguyen</p>" >> site/index.html
-          echo "<hr><ul>" >> site/index.html
-          for OS in ubuntu-latest windows-latest; do
-            mkdir -p site/latest/$OS
-            cp -r artifacts/validation-report-$OS/* site/latest/$OS/ || true
-            echo "<li><a href='latest/$OS/validation_report.html'>Latest report for $OS</a></li>" >> site/index.html
-          done
-          echo "</ul><hr><p>Generated: $(TZ='America/Los_Angeles' date)</p></body></html>" >> site/index.html
+          mkdir -p ${{ env.SITE_DIR }}
+          if [ -f ${{ env.HISTORY_FILE }} ]; then
+            echo "History found"
+          else
+            echo "[]" > ${{ env.HISTORY_FILE }}
+          fi
 
-      - name: Upload Pages Artifact
+      - name: Update build history JSON
+        id: update_history
+        run: |
+          BUILD_NUM=${{ github.run_number }}
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          RESULT="${{ needs.test.outputs.test_outcome }}"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          jq --arg build "$BUILD_NUM" \
+             --arg result "$RESULT" \
+             --arg time "$TIMESTAMP" \
+             --arg url "$RUN_URL" \
+             '. += [{"build": $build|tonumber, "result": $result, "time": $time, "url": $url}]' \
+             ${{ env.HISTORY_FILE }} > temp.json
+          mv temp.json ${{ env.HISTORY_FILE }}
+
+      - name: Build dashboard HTML
+        run: |
+          SITE=${{ env.SITE_DIR }}
+          mkdir -p "$SITE/latest"
+
+          echo "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>SSD Validation Dashboard</title>" > "$SITE/index.html"
+          echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>" >> "$SITE/index.html"
+          echo "<style>body{font-family:Segoe UI,Arial;margin:40px;}canvas{max-width:600px;}</style></head><body>" >> "$SITE/index.html"
+
+          echo "<h1>💾 SSD Hyperscale Automation Framework</h1>" >> "$SITE/index.html"
+          echo "<h3>Build History Trend</h3><canvas id='trendChart'></canvas>" >> "$SITE/index.html"
+          echo "<script>" >> "$SITE/index.html"
+          echo "fetch('history.json').then(r=>r.json()).then(data=>{" >> "$SITE/index.html"
+          echo "const builds=data.map(d=>d.build);const results=data.map(d=>d.result);" >> "$SITE/index.html"
+          echo "const passCount=data.filter(d=>d.result==='PASS').length;" >> "$SITE/index.html"
+          echo "const failCount=data.filter(d=>d.result==='FAIL').length;" >> "$SITE/index.html"
+          echo "const unstableCount=data.filter(d=>d.result==='UNSTABLE').length;" >> "$SITE/index.html"
+          echo "const colors=results.map(r=>r==='PASS'?'#4CAF50':(r==='UNSTABLE'?'#FFC107':'#F44336'));" >> "$SITE/index.html"
+          echo "new Chart(document.getElementById('trendChart'),{type:'line',data:{labels:builds,datasets:[{label:'Build Results',data:results.map(r=>r==='PASS'?1:(r==='UNSTABLE'?0:-1)),borderColor:'#2196F3',tension:0.2,fill:false,pointBackgroundColor:colors,pointRadius:6}]},options:{scales:{y:{ticks:{callback:v=>v==1?'PASS':v==0?'UNSTABLE':'FAIL'},min:-1,max:1}}}});" >> "$SITE/index.html"
+          echo "});</script>" >> "$SITE/index.html"
+
+          echo "<h3>Latest Reports</h3><ul>" >> "$SITE/index.html"
+          for OS in ubuntu-latest windows-latest; do
+            mkdir -p "$SITE/latest/$OS"
+            cp -r artifacts/validation-report-$OS/* "$SITE/latest/$OS/" || true
+            echo "<li><a href='latest/$OS/validation_report.html'>Latest Report for $OS</a></li>" >> "$SITE/index.html"
+          done
+          echo "</ul><hr><p>Generated $(TZ='America/Los_Angeles' date)</p></body></html>" >> "$SITE/index.html"
+
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: ${{ env.SITE_DIR }}
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
 
-      # ✅ FIX: Add clear workflow summary with badges
-      - name: Add Workflow Summary (Badges)
+      - name: Workflow summary with badges
         if: always()
         run: |
           PAGE_URL="${{ steps.deployment.outputs.page_url }}"
-          TEST_RESULT="${{ needs.test.outputs.test_outcome }}"
-          BASE_URL="${PAGE_URL%/}"
-
           echo "### 💾 SSD Validation CI/CD Summary" >> $GITHUB_STEP_SUMMARY
+          echo "[![Ubuntu Report](https://img.shields.io/badge/Ubuntu-Latest-blue)](${PAGE_URL}/latest/ubuntu-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Windows Report](https://img.shields.io/badge/Windows-Latest-blue)](${PAGE_URL}/latest/windows-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![All Builds](https://img.shields.io/badge/View-History-green)](${PAGE_URL}/)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[![Ubuntu Report](https://img.shields.io/badge/Ubuntu-Latest_Report-blue)](${BASE_URL}/latest/ubuntu-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
-          echo "[![Windows Report](https://img.shields.io/badge/Windows-Latest_Report-blue)](${BASE_URL}/latest/windows-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
-          echo "[![All Builds](https://img.shields.io/badge/View-History-green)](${BASE_URL}/)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Build #${{ github.run_number }} – Result:** ${TEST_RESULT}" >> $GITHUB_STEP_SUMMARY
+          echo "**Build #${{ github.run_number }} Result:** ${{ needs.test.outputs.test_outcome }}" >> $GITHUB_STEP_SUMMARY
