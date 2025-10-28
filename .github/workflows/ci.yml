@@ -24,7 +24,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
 
     outputs:
-      # FIX 1: Corrected step ID to match the step name 'run_behave_tests'
+      # FIX 1: Corrected step ID from 'run_tests' to 'run_behave_tests'
       test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }} 
 
     steps:
@@ -50,7 +50,7 @@ jobs:
           set +e
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # Ensure 'jq' is installed for JSON handling on Linux
+          # FIX: Ensure 'jq' is installed for JSON handling on Linux
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             sudo apt-get update
             sudo apt-get install -y jq
@@ -87,27 +87,38 @@ jobs:
           echo "$RESULT" > "$REPORT_DIR/status.txt"
           echo "$(TZ='America/Los_Angeles' date)" > "$REPORT_DIR/timestamp.txt"
           
-          # --- ✅ FIX: Robustly parse test counts from scenario summary line ---
-          # Get the full summary line for scenarios
+          # --- ✅ FIX 3: Robustly parse test counts from scenario summary line using sed/grep ---
+          # Get the full summary line for scenarios (e.g., "59 scenarios passed, 3 failed, 0 skipped")
           SUMMARY_LINE=$(grep 'scenarios\.' /tmp/behave_output.txt | tail -n 1)
 
-          # Extract Passed count (number before 'scenarios passed')
-          PASSED_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*([0-9]+) scenarios passed.*/\1/' 2>/dev/null | grep -o '^[0-9]\+$' || echo 0)
+          # Extract Passed count (number before 'scenarios passed'). Use more specific pattern matching.
+          # We check if the SUMMARY_LINE contains "passed" before trying to extract the number.
+          if echo "$SUMMARY_LINE" | grep -q 'passed'; then
+            PASSED_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*([0-9]+) scenarios passed.*/\1/' | grep -o '^[0-9]\+$' || echo 0)
+          else
+            PASSED_COUNT=0
+          fi
           
-          # Extract Failed count (number before 'failed')
-          FAILED_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*, ([0-9]+) failed.*/\1/' 2>/dev/null | grep -o '^[0-9]\+$' || echo 0)
+          # Extract Failed count (number before 'failed').
+          # We check if the SUMMARY_LINE contains "failed" before trying to extract the number.
+          if echo "$SUMMARY_LINE" | grep -q 'failed'; then
+            FAILED_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*, ([0-9]+) failed.*/\1/' | grep -o '^[0-9]\+$' || echo 0)
+          else
+            FAILED_COUNT=0
+          fi
 
           if [ "$RESULT" = "UNSTABLE" ]; then
+            # If the build is unstable (i.e., tests failed), we mark one broken point on the graph
             BROKEN_COUNT=1
           else
             BROKEN_COUNT=0
           fi
           
-          # Create the summary.json artifact using jq
+          # Create the summary.json artifact using jq. This is CRITICAL for the chart data.
           echo "{ \"statistic\": { \"passed\": ${PASSED_COUNT}, \"failed\": ${FAILED_COUNT}, \"broken\": ${BROKEN_COUNT} } }" | jq . > "$REPORT_DIR/summary.json"
           
           echo "Generated summary.json with Passed: ${PASSED_COUNT}, Failed: ${FAILED_COUNT}, Broken: ${BROKEN_COUNT}"
-          # --- END FIX ---
+          # --- END FIX 3 ---
 
       - uses: actions/upload-artifact@v4
         with:
@@ -127,7 +138,7 @@ jobs:
       - name: Install JQ
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      # --- FIX 2: History Preservation ---
+      # --- FIX 1: History Preservation ---
       - name: Get workflow filename
         id: get_workflow_name
         run: echo "WORKFLOW_FILE=$(basename .github/workflows/*.yml)" >> $GITHUB_ENV
@@ -146,10 +157,10 @@ jobs:
           mkdir -p "${{ env.SITE_DIR }}"
           if [ -d "previous-site" ]; then
             echo "♻️ Restoring previous site history..."
-            # Copy all contents recursively from the downloaded artifact location
+            # Use cp -R to recursively copy all content, fixing the missing history issue.
             cp -R previous-site/* "${{ env.SITE_DIR }}/" || true
           fi
-      # --- END FIX 2 ---
+      # --- END FIX 1 ---
 
       - name: Download Test Results
         uses: actions/download-artifact@v4
@@ -170,10 +181,10 @@ jobs:
             # Ensure target directories exist
             mkdir -p "$REPORT_DIR_BUILD" "$REPORT_DIR_LATEST"
 
-            # This copies the newly downloaded artifact content (build-$OS) to the build-specific history folder
+            # ⚠️ This is where the downloaded artifacts (build-ubuntu-latest) are moved to the build history folder
             cp -R reports/build-$OS/* "$REPORT_DIR_BUILD/" || true
             
-            # FIX 3: Copy new report to the /latest/ directory recursively to ensure all files (including validation_report.html) are there
+            # ✅ FIX 2: Copy new report to the /latest/ directory recursively to ensure all files (including validation_report.html) are there
             cp -R "$REPORT_DIR_BUILD/"* "$REPORT_DIR_LATEST/" || true
 
             # Generate metadata files for the latest report
@@ -205,7 +216,7 @@ jobs:
             margin: 0; 
           }
           </style></head><body>
-          <h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>
+          <h1>🤖 Hyperscale SSD Framework Simulation CI/CD Build History</h1>
           <h2>🧩 Latest Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
 
           for OS in ubuntu-latest windows-latest; do
@@ -246,6 +257,7 @@ jobs:
             TOTAL_UNSTABLE=0 
             
             for OS in ubuntu-latest windows-latest; do
+              # The summary.json is generated in the root of the build folder, not in /widgets/
               SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json" 
               
               if [ -f "$SUMMARY_FILE" ]; then
@@ -346,7 +358,7 @@ jobs:
             STATUS_TEXT="All tests passed"
           fi
 
-          echo "### 🤖 Hyperscale SSD Framework CI/CD" >> $GITHUB_STEP_SUMMARY
+          echo "### 🤖 Hyperscale SSD Framework Simulation CI/CD" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "[![Ubuntu Latest Report](https://img.shields.io/badge/Ubuntu-Latest_Build-blue)](${BASE_URL}/latest/ubuntu-latest/index.html)" >> $GITHUB_STEP_SUMMARY
           echo "[![Windows Latest Report](https://img.shields.io/badge/Windows-Latest_Build-blue)](${BASE_URL}/latest/windows-latest/index.html)" >> $GITHUB_STEP_SUMMARY
