@@ -103,17 +103,15 @@ jobs:
           name: validation-report-${{ matrix.os }}
           path: reports/${{ github.run_number }}/${{ matrix.os }}
           retention-days: 7
-          
+
       # Upload the timestamp separately for the report job to use
       - name: Upload Timestamp Artifact
         uses: actions/upload-artifact@v4
         with:
           name: timestamp-${{ matrix.os }}
-          path: .
+          path: timestamp.txt
           retention-days: 7
           if-no-files-found: ignore
-        run: echo "${{ steps.get_timestamp.outputs.TIMESTAMP }}" > timestamp.txt
-
 ---
   report:
     name: Generate History Dashboard & Deploy
