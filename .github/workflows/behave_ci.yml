@@ -116,19 +116,12 @@ jobs:
             cp -r previous-site/* "${{ env.SITE_DIR }}/" || true
           fi
 
-      - name: Download Allure CLI
-        run: |
-          wget https://github.com/allure-framework/allure2/releases/download/${{ env.ALLURE_VERSION }}/allure-${{ env.ALLURE_VERSION }}.tgz
-          tar -xzf allure-${{ env.ALLURE_VERSION }}.tgz
-          mv allure-${{ env.ALLURE_VERSION }} allure-commandline
-          echo "$(pwd)/allure-commandline/bin" >> $GITHUB_PATH
-
-      - name: Download Allure Test Results
+      - name: Download Test Results
         uses: actions/download-artifact@v4
         with:
           path: reports
 
-      - name: Generate Allure Reports Per OS
+      - name: Generate Reports Per OS
         shell: bash
         run: |
           SITE_DIR="site"
@@ -147,38 +140,22 @@ jobs:
               cp -r "site/latest/$OS/history/"* "$RESULTS_DIR/history/" || true
             fi
 
-            if [ "$OS" == "ubuntu-latest" ]; then
-              cp supports/ubuntu.properties "$RESULTS_DIR/environment.properties" 2>/dev/null || true
-            else
-              cp supports/windows.properties "$RESULTS_DIR/environment.properties" 2>/dev/null || true
-            fi
-            cp supports/categories.json "$RESULTS_DIR/categories.json" 2>/dev/null || true
-
             REPO_NAME="${GITHUB_REPOSITORY##*/}"
             echo "{\"name\":\"$OS\",\"type\":\"GitHub Actions\",\"url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\",\"reportUrl\":\"https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/latest/$OS/\",\"buildOrder\":\"${BUILD_NUMBER}\",\"buildName\":\"Build ${BUILD_NUMBER} ($OS)\",\"buildUrl\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" > "$RESULTS_DIR/executor.json"
 
-            allure generate "$RESULTS_DIR" -o "$REPORT_DIR_BUILD" --clean
             cp -r "$REPORT_DIR_BUILD"/* "$REPORT_DIR_LATEST/" || true
             date -u > "$REPORT_DIR_BUILD/build-info.txt"
             date -u > "$REPORT_DIR_LATEST/build-info.txt"
           done
 
-      - name: Fix Allure Paths
-        shell: bash
-        run: |
-          find site -type f \( -path "*/latest/*" -o -path "*/${{ github.run_number }}/*" \) -name 'index.html' | while read FILE_PATH; do
-            perl -pi -e 's|src="/|src="./|g' "$FILE_PATH"
-            perl -pi -e 's|href="/|href="./|g' "$FILE_PATH"
-          done
-
-      - name: Rebuild index.html with Trend Charts
+       - name: Rebuild index.html with Trend Charts
         shell: bash
         run: |
           SITE_DIR="site"
           CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
           mkdir -p "$SITE_DIR"
 
-          echo "<html><head><title>Allure Reports History</title>
+          echo "<html><head><title>Reports History</title>
           <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
           <style>
           body{font-family:sans-serif;margin:20px;}
@@ -194,7 +171,7 @@ jobs:
           }
           </style></head><body>
           <h1>🤖 Hyperscale SSD Framework Simulation CI/CD Build History</h1>
-          <h2>🧩 Latest Allure Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
+          <h2>🧩 Latest Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
 
           for OS in ubuntu-latest windows-latest; do
             if [ -d "$SITE_DIR/latest/$OS" ]; then
@@ -309,10 +286,10 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Upload Allure History Artifact
+      - name: Upload History Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: allure-history
+          name: history
           path: ${{ env.SITE_DIR }}
           retention-days: 7
 
