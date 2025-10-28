@@ -7,7 +7,7 @@ if not exist reports mkdir reports
 del /q reports\*.html 2>nul
 rem behave --tags=@all --exclude "features/manual_tests" --step_timeout=SECONDS -f html-pretty -o reports\automation_report.html
 behave --tags=@all --exclude "features/manual_tests" -f html-pretty -o reports\automation_report.html
-
+rem behave --tags=@all --exclude "features/manual_tests" -f allure_behave.formatter:AllureFormatter -o allure-results
 rem Set the source file name.
 set "source_file=reports\automation_report.html"
 
@@ -45,23 +45,24 @@ rem === Build Supporting Reports ===
 rem The following scripts were updated to take a single <features_dir> argument.
 echo.
 echo Building Test Coverage Report...
-python tools\test_coverage.py reports\ssd_requirements.csv features
+python supports\test_coverage.py reports\ssd_requirements.csv features
 
 echo.
 echo Building PRD Summary Report...
-python tools\prd2html.py reports\product.json reports\ssd_requirements.csv
+python supports\prd2html.py supports\product.json supports\requirements.csv
 
 echo.
 echo Building Validation Plan...
-python tools\validation_plan_builder.py reports\validation.json features
+python supports\validation_plan_builder.py reports\validation.json features
 
 echo.
 echo Building Automation Rate Metric...
-python tools\automation_rate.py features
+python supports\automation_rate.py features
 
 rem === Open Reports in Browser ===
 echo.
 echo Opening reports in browser...
+sleep 3
 for %%f in (reports\*.html) do (
     start "" "%%~f"
 )

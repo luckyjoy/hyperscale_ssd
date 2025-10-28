@@ -1,0 +1,93 @@
+requirement_id,requirement_description
+
+#Performance and Workload
+REQ_SSD_04: The system shall execute a 70/30 random read/write FIO workload on both NVMe devices.
+
+REQ_SSD_05: The system shall ensure IO latency and throughput remain within acceptable thresholds during mixed read/write workloads.
+
+REQ_SSD_08: The system shall inject up to 5 random latency spikes of 50-200ms without violating IO latency thresholds.
+
+REQ_SSD_10: The SSD shall maintain write throughput within 90% of its baseline under sustained high-write workloads.
+
+REQ_SSD_11: The system shall not report any critical errors during sustained high-write endurance tests.
+
+REQ_SSD_13: The system shall ensure IOPS scales linearly with queue depth up to the hardware limit.
+
+REQ_SSD_14: The system shall maintain latency within hardware specifications during queue depth scaling.
+
+REQ_SSD_22: The system shall achieve a minimum average read IOPS and write IOPS for different mixed workloads.
+
+REQ_SSD_23: The system shall achieve a minimum average write throughput for prolonged endurance tests.
+
+REQ_SSD_24: The system shall maintain average write latency below a specified threshold during prolonged endurance tests.
+
+REQ_SSD_27: The system shall ensure that IOPS and latency are stable during mixed read/write workloads.
+
+REQ_SSD_36: The SSD shall support power state transitions (e.g., from active to idle) to optimize power consumption without impacting IO performance.
+
+REQ_SSD_40: The SSD shall maintain IOPS stability during garbage collection cycles.
+
+#Resilience and Reliability
+REQ_SSD_06: The system shall recover NVMe devices successfully after random hot-unplug events during heavy IO workload.
+
+REQ_SSD_07: The system shall maintain acceptable IO metrics after power loss and recovery events under multi-queue fio jobs.
+
+REQ_SSD_25: The system shall ensure data integrity and detect no corruption after a random power loss event.
+
+REQ_SSD_26: The system shall ensure no data corruption is detected after a hot unplug or controller reset event.
+
+REQ_SSD_29: The SSD shall support hot-swap functionality without system-level errors or reboots.
+
+#Multi-Tenant and QoS (Quality of Service)
+REQ_SSD_03: The system shall launch a VM with two NVMe devices for multi-tenant workloads.
+
+REQ_SSD_12: The system shall be capable of launching multiple VMs that share a single NVMe SSD.
+
+REQ_SSD_19: The system shall be able to throttle IOPS for a specific VM sharing a multi-tenant SSD.
+
+REQ_SSD_20: The system shall ensure an un-throttled VM achieves full IOPS when sharing an SSD with a throttled VM.
+
+REQ_SSD_21: The system shall ensure a throttled VM does not exceed its assigned IOPS.
+
+REQ_SSD_32: The SSD shall support NVMe namespace creation, deletion, and resizing without errors or data loss.
+
+REQ_SSD_33: The SSD shall support a dedicated IO path for critical workloads, ensuring their performance is not impacted by other tenants.
+
+REQ_SSD_39: The system shall support a maximum of 256 NVMe namespaces per SSD for multi-tenant isolation.
+
+#Telemetry and Monitoring
+REQ_SSD_09: The system shall log IO performance metrics and fault events for verification after each scenario.
+
+REQ_SSD_15: The system shall ensure SSD temperature remains below a specified threshold (70∘ C) during various workloads.
+
+REQ_SSD_16: The SSD shall not report any reallocated sectors during SMART attribute polling.
+
+REQ_SSD_30: The SSD shall report predictive failure data (e.g., flash wear, media errors) via telemetry logs to allow for proactive replacement.
+
+REQ_SSD_37: The system shall expose detailed SMART and telemetry data via a standardized API for host-level monitoring.
+
+REQ_SSD_38: The SSD shall report unexpected power loss counts and the last logged power loss time.
+
+#Firmware and Management
+REQ_SSD_17: The system shall successfully complete a firmware update while the SSD is under different load levels.
+
+REQ_SSD_18: The SSD shall remain accessible and functional after a firmware update.
+
+REQ_SSD_31: The system shall allow a firmware rollback to the previous stable version in case of a failed update.
+
+#Data Integrity and Security
+REQ_SSD_28: The SSD shall support a verifiable secure erase function that renders all data unrecoverable.
+
+REQ_SSD_34: The SSD must support hardware-based full-drive encryption (FDE) and provide a method for key management.
+
+REQ_SSD_35: The system shall securely boot the SSD firmware using a digital signature to prevent unauthorized modifications.
+
+#Basic Functionality
+REQ_SSD_01: The system shall successfully launch a VM with NVMe SSD attached.
+
+REQ_SSD_02: The VM shall remain running and reachable after launch with NVMe SSD.
+
+#Vendor Performance Comparison
+REQ_COM_01: Compare sequential read/write speeds between multiple SSDs of different providers
+REQ_COM_02: Compare random 4K I/O performance between multiple SSDs of different providers
+#

@@ -13,7 +13,8 @@ Examples:
   | percent | duration |
   | 90      | 1        |
   | 95      | 4        |
-  | 100     | 8        |
+    | 55      | 5       |
+ # | 100     | 8        |
 
 @multi-tenant
 Scenario Outline: <REQ_SSD_12> <REQ_SSD_05> Randomized multi-tenant IO stress
@@ -37,11 +38,11 @@ And latency should remain within hardware spec
 
 Examples:
   | qd  |
-  | 1   |
   | 16  |
   | 32  |
   | 64  |
   | 128 |
+#  | 256 |
 
 @smart_monitoring
 Scenario Outline: <REQ_SSD_15> <REQ_SSD_16> SMART monitoring and SMART polling

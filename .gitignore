@@ -1,10 +1,11 @@
 # Existing ignored dirs
 data/
 temp/
-spdk/
-qemu-faults/
 logs/
 examples/
+supports/*.py
+allure-results/
+tmp/
 
 # VM images & snapshots (HUGE files, never commit)
 *.qcow2
@@ -13,9 +14,8 @@ examples/
 *.vmdk
 
 # Reports & logs
-reports/
 *.log
-*.json
+
 
 # Python caches
 __pycache__/
@@ -26,6 +26,7 @@ __pycache__/
 .behave/
 .tox/
 .eggs/
+.bat
 
 # Build/virtualenv
 .env/

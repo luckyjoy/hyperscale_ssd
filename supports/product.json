@@ -1,0 +1,37 @@
+{
+  "Title": "Hyperscale SSD Product Requirements Document Summary",
+  "Version": "1.0",
+  "Date": "September 9, 2025",
+  "ProductName": "Hyperscale SSD",
+  "ProductModel": "XD7P Series",
+  "ProductVersion": "3.2",
+  "FirmwareVersion": "6.22.14, 6.26.0, 7.0.0",
+  "ProductManufacturer": "ABCDEF Inc.",
+  "ProductManager": "TBD, Role-based",
+  "TargetEnvironment": "Hyperscale and Cloud Data Centers",
+  "Interface": "PCIe® 5.0, NVMe™ 2.0",
+  "FormFactor": "E1.S (EDSFF)",
+  "PlatformSupport": {
+    "OperatingSystems": [
+      "Linux",
+      "Windows Server"
+    ],
+    "ServerArchitectures": [
+      "x86-64 (Intel and AMD)",
+      "ARM"
+    ],
+    "CloudPlatforms": [
+      "Microsoft Azure",
+      "Google Cloud Platform",
+      "Amazon Web Services"
+    ]
+  },
+  "KeyFeatures": [
+    "High density and efficiency",
+    "Low and consistent latency",
+    "Optimized for thermal management",
+    "High performance for demanding workloads",
+    "Power loss protection"
+  ],
+  "Copyright": "\u00a9 2025 Bang Thien Nguyen. All rights reserved."
+}

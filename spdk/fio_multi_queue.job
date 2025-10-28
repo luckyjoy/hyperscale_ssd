@@ -1,0 +1,15 @@
+[global]
+ioengine=spdk
+thread=1
+direct=1
+runtime=600
+time_based=1
+group_reporting=1
+stonewall
+size=4G
+
+[test2]
+rw=randwrite
+bs=4k
+iodepth=64
+numjobs=8

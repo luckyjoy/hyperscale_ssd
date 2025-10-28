@@ -1,0 +1,15 @@
+[test_nvme0]
+filename=nvme0
+rw=randread
+bs=8k
+iodepth=32
+numjobs=4
+size=2G
+
+[test_nvme1]
+filename=nvme1
+rw=randwrite
+bs=8k
+iodepth=32
+numjobs=4
+size=2G
