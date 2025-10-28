@@ -24,7 +24,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
 
     outputs:
-      # ✅ FIX 1: Corrected step ID from 'run_tests' to 'run_behave_tests'
+      # ✅ FIX 1: Corrected step ID to match the step name 'run_behave_tests'
       test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }} 
 
     steps:
@@ -86,7 +86,7 @@ jobs:
           echo "$(TZ='America/Los_Angeles' date)" > "$REPORT_DIR/timestamp.txt"
           
           # --- ✅ FIX 2 (CRITICAL): Generate summary.json for trend chart statistics ---
-          # This entire block was missing and is the core reason the chart shows 0.
+          # This code parses the test results from Behave's standard output.
           STATS_LINE=$(grep 'scenarios\.' /tmp/behave_output.txt | tail -n 1)
 
           PASSED_SCENARIOS=$(echo "$STATS_LINE" | grep -o '[0-9]\+ passed' | awk '{print $1}')
@@ -267,7 +267,6 @@ jobs:
             LABELS="$LABELS'$BUILD',"
             PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
             UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
-            # The FAIL count will be added explicitly to the chart data as a separate line
             FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
           done
 
