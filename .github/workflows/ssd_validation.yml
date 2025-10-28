@@ -22,15 +22,15 @@ env:
 
 jobs:
   # Job 1: Runs tests on matrix OSes and uploads artifacts
-  test:
+  test: # Renamed from 'build-and-test' for consistency and clarity
     name: Run Behave Tests on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
 
-    # Output to be used by the report job to determine overall status
     outputs:
+      # Output overall status for the 'report' job
       test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }}
 
     steps:
@@ -50,7 +50,7 @@ jobs:
 
       - name: Run Behave Tests
         id: run_behave_tests
-        # Use bash shell to ensure 'mkdir -p' and other shell commands work reliably cross-platform
+        # FIX: Use bash shell for cross-platform compatibility (fixes mkdir -p error)
         shell: bash
         run: |
           set +e
@@ -60,23 +60,24 @@ jobs:
           REPORT_PATH="$REPORT_DIR/validation_report.html"
           STATS_FILE="$REPORT_DIR/stats.txt"
 
+          # 1. Create the necessary directory structure
           mkdir -p "$REPORT_DIR"
 
-          # 1. Run Behave and capture output
+          # 2. Run Behave and capture output
           behave --tags=@adv --exclude "features/manual_tests" --format behave_html_pretty_formatter:PrettyHTMLFormatter -o "$REPORT_PATH" --no-capture | tee /tmp/behave_output.txt
           TEST_EXIT_CODE=$?
           
-          # 2. Extract stats for trend analysis
+          # 3. Extract stats for trend analysis
           grep 'Features:' /tmp/behave_output.txt | sed 's/Features: //' > "$STATS_FILE"
           
-          # 3. Determine and set overall test outcome
+          # 4. Determine and set overall test outcome
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             if grep -q "failed" /tmp/behave_output.txt; then
                 echo "test_outcome=UNSTABLE" >> $GITHUB_OUTPUT
             else
                 echo "test_outcome=FAIL" >> $GITHUB_OUTPUT
             fi
-            exit 0 # Exit 0 to ensure artifact steps run
+            exit 0
           else
             echo "test_outcome=PASS" >> $GITHUB_OUTPUT
             exit 0
@@ -89,7 +90,6 @@ jobs:
       - name: Create Timestamp File
         id: create_timestamp_file
         shell: bash
-        # Creates the file that the next step will upload
         run: echo "${{ steps.get_timestamp.outputs.TIMESTAMP }}" > timestamp.txt
           
       - name: Upload Timestamp Artifact
@@ -112,7 +112,7 @@ jobs:
   report:
     name: Generate History Dashboard & Deploy
     runs-on: ubuntu-latest
-    needs: test # Depends on the 'test' job finishing
+    needs: test # DEPENDENCY: This job runs after all test matrix jobs are complete
 
     steps:
       - name: Checkout repository
@@ -178,14 +178,18 @@ jobs:
           CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
           BUILD_NUMBER=${{ github.run_number }}
           mkdir -p "$SITE_DIR/latest"
-          
-          # (Omitted HTML/Chart generation code for brevity, but it is included in the full final solution)
-          # This is the step that creates the index.html and all report links.
-          
-          # Recreating HTML structure and links
+
+          # HTML structure start
           echo "<html><head><title>SSD Validation Build History</title>
           <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
-          <style>/* styles */</style></head><body>
+          <style>
+          body{font-family:sans-serif;margin:20px;}
+          ul{list-style:none;padding:0;}
+          li{margin:6px 0;}
+          a{text-decoration:none;color:#0366d6;}
+          a:hover{text-decoration:underline;}
+          #chart-container { max-width: 800px; max-height: 400px; margin: 0; }
+          </style></head><body>
           <h1>💾 SSD Hyperscale Automation Framework Build History</h1>
           <h2>🧩 Latest Validation Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
           
@@ -205,6 +209,11 @@ jobs:
           
           # Gather and display build history links
           BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr)
+          CHART_BUILDS=$(echo "$BUILDS" | sort -n)
+          LABELS=""
+          PASS_COUNTS=""
+          FAIL_COUNTS=""
+          
           for BUILD in $BUILDS; do
             TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "")
             TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
@@ -212,8 +221,50 @@ jobs:
           done
           echo "</ul>" >> "$SITE_DIR/index.html"
           
-          # (Omitted Chart.js data gathering and script injection for brevity)
-          echo "<hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
+          # Gather chart data
+          for BUILD in $CHART_BUILDS; do
+            TOTAL_PASS=0
+            TOTAL_FAIL=0
+            
+            for OS in ubuntu-latest windows-latest; do
+              STATS_FILE="$SITE_DIR/$BUILD/$OS/stats.txt"
+              if [ -f "$STATS_FILE" ]; then
+                PASS_COUNT=$(grep -oE '[0-9]+ passed' "$STATS_FILE" | awk '{print $1}')
+                FAIL_COUNT=$(grep -oE '[0-9]+ failed' "$STATS_FILE" | awk '{print $1}')
+                
+                TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
+                TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
+              fi
+            done
+            
+            LABELS="$LABELS'$BUILD',"
+            PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
+            FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
+          done
+          
+          # Chart.js Integration
+          echo "<div id='chart-container'>
+          <canvas id='trendChart'></canvas>
+          </div>
+          <script>
+          const ctx = document.getElementById('trendChart').getContext('2d');
+          new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: [${LABELS%,}],
+              datasets: [
+                {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', backgroundColor: 'rgba(0, 128, 0, 0.2)', fill: false},
+                {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', backgroundColor: 'rgba(255, 0, 0, 0.2)', fill: false}
+              ]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } },
+              scales: { y: { beginAtZero: true, title: { display: true, text: 'Total Passed Features/Scenarios' } },
+                        x: { title: { display: true, text: 'Build Number' } } }
+            }
+          });
+          </script>
+          <hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
@@ -221,7 +272,7 @@ jobs:
           path: ${{ env.SITE_DIR }}
 
       - name: Deploy to GitHub Pages
-        id: deployment
+        id: deployment # CRUCIAL: Gets the deployment URL
         uses: actions/deploy-pages@v4
 
       - name: Upload History Dashboard Artifact
@@ -231,9 +282,8 @@ jobs:
           path: ${{ env.SITE_DIR }}
           retention-days: 7
 
-      - name: Add Workflow Summary (Badges)
+      - name: Add Workflow Summary (Badges) # THIS STEP PRINTS THE BADGES
         run: |
-          # The page_url from the deployment step is crucial for the links
           PAGE_URL=${{ steps.deployment.outputs.page_url }}
           BASE_URL="${PAGE_URL%/}"
           TEST_STATUS=${{ needs.test.outputs.test_outcome }}
