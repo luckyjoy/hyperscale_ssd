@@ -10,7 +10,7 @@ on:
     # Runs at 1:00 AM PT every day.
     - cron: '0 8 * * *'
 
-# Grant permissions for deployment
+# Grant permissions for deployment to GitHub Pages
 permissions:
   contents: write
   pages: write
@@ -49,7 +49,7 @@ jobs:
 
       - name: Run Behave Tests
         id: run_behave_tests
-        # FIX: Explicitly set shell to bash to ensure 'mkdir -p' works on Windows
+        # Ensure bash is used for cross-platform compatibility (fixes mkdir -p on Windows)
         shell: bash
         run: |
           set +e
@@ -62,11 +62,12 @@ jobs:
           # 1. Create the necessary directory structure
           mkdir -p "$REPORT_DIR"
 
-          # 2. Run Behave and output to the build-specific path
+          # 2. Run Behave and output to a file, while also piping to tee to capture output
           behave --tags=@adv --exclude "features/manual_tests" --format behave_html_pretty_formatter:PrettyHTMLFormatter -o "$REPORT_PATH" --no-capture | tee /tmp/behave_output.txt
           TEST_EXIT_CODE=$?
           
           # 3. Extract simple statistics for trend analysis
+          # Captures the summary line like "Features: 10 passed, 2 failed..."
           grep 'Features:' /tmp/behave_output.txt | sed 's/Features: //' > "$STATS_FILE"
           
           # 4. Logic to determine test outcome
@@ -88,10 +89,10 @@ jobs:
         id: get_timestamp
         run: echo "TIMESTAMP=$(date -u)" >> $GITHUB_OUTPUT
 
-      # FIX: Split the timestamp creation and upload steps
       - name: Create Timestamp File
         id: create_timestamp_file
         shell: bash
+        # Creates the file that the next step will upload
         run: echo "${{ steps.get_timestamp.outputs.TIMESTAMP }}" > timestamp.txt
           
       - name: Upload Timestamp Artifact
@@ -106,6 +107,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: validation-report-${{ matrix.os }}
+          # Path points to the reports directory created above, containing the HTML and stats.txt
           path: reports/${{ github.run_number }}/${{ matrix.os }}
           retention-days: 7
 
@@ -123,6 +125,7 @@ jobs:
         id: get_workflow_name
         run: echo "WORKFLOW_FILE=$(basename .github/workflows/*.yml)" >> $GITHUB_ENV
 
+      # Download previous site history for trend preservation
       - name: Download previous History Artifact
         uses: dawidd6/action-download-artifact@v6
         with:
@@ -187,6 +190,9 @@ jobs:
           BUILD_NUMBER=${{ github.run_number }}
           mkdir -p "$SITE_DIR/latest"
 
+          # ----------------------------------------------------
+          # HTML/CSS/Chart.js Setup (unchanged)
+          # ----------------------------------------------------
           echo "<html><head><title>SSD Validation Build History</title>
           <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
           <style>
@@ -204,6 +210,7 @@ jobs:
           <h1>💾 SSD Hyperscale Automation Framework Build History</h1>
           <h2>🧩 Latest Validation Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
           
+          # Create 'latest' links
           for OS in ubuntu-latest windows-latest; do
               LATEST_DIR="$SITE_DIR/latest/$OS"
               CURRENT_DIR="$SITE_DIR/$BUILD_NUMBER/$OS"
@@ -225,6 +232,7 @@ jobs:
           PASS_COUNTS=""
           FAIL_COUNTS=""
           
+          # Create history links
           for BUILD in $BUILDS; do
             TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "")
             TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
@@ -233,6 +241,7 @@ jobs:
           done
           echo "</ul>" >> "$SITE_DIR/index.html"
           
+          # Gather chart data
           for BUILD in $CHART_BUILDS; do
             TOTAL_PASS=0
             TOTAL_FAIL=0
@@ -240,7 +249,7 @@ jobs:
             for OS in ubuntu-latest windows-latest; do
               STATS_FILE="$SITE_DIR/$BUILD/$OS/stats.txt"
               if [ -f "$STATS_FILE" ]; then
-                # FIX: Corrected awk quoting to use single quotes
+                # Extract counts using grep and awk
                 PASS_COUNT=$(grep -oE '[0-9]+ passed' "$STATS_FILE" | awk '{print $1}')
                 FAIL_COUNT=$(grep -oE '[0-9]+ failed' "$STATS_FILE" | awk '{print $1}')
                 
@@ -254,6 +263,9 @@ jobs:
             FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
           done
 
+          # ----------------------------------------------------
+          # Chart.js Integration (unchanged)
+          # ----------------------------------------------------
           echo "<div id='chart-container'>
           <canvas id='trendChart'></canvas>
           </div>
@@ -294,6 +306,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        # NOTE: This step automatically makes your dashboard viewable via your GitHub Pages URL (e.g., https://<owner>.github.io/<repo>/)
 
       - name: Upload History Dashboard Artifact
         uses: actions/upload-artifact@v4
@@ -302,6 +315,9 @@ jobs:
           path: ${{ env.SITE_DIR }}
           retention-days: 7
 
+      # ----------------------------------------------------
+      # ✅ Workflow Summary (Badges) Step
+      # ----------------------------------------------------
       - name: Add Workflow Summary (Badges)
         run: |
           PAGE_URL=${{ steps.deployment.outputs.page_url }}
