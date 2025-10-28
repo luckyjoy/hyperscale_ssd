@@ -24,8 +24,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
 
     outputs:
-      # 💥 FIX 1: Corrected step ID from 'run_tests' to 'run_behave_tests'
-      test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }}
+      # ✅ FIX 1: Corrected step ID from 'run_tests' to 'run_behave_tests'
+      test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }} 
 
     steps:
       - name: Checkout repository
@@ -50,7 +50,7 @@ jobs:
           set +e
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # FIX 2: Ensure 'jq' is installed for JSON handling
+          # FIX: Ensure 'jq' is installed for JSON handling on Linux
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             sudo apt-get update
             sudo apt-get install -y jq
@@ -85,7 +85,8 @@ jobs:
           echo "$RESULT" > "$REPORT_DIR/status.txt"
           echo "$(TZ='America/Los_Angeles' date)" > "$REPORT_DIR/timestamp.txt"
           
-          # --- 💥 FIX 2: Generate summary.json for trend chart statistics ---
+          # --- ✅ FIX 2 (CRITICAL): Generate summary.json for trend chart statistics ---
+          # This entire block was missing and is the core reason the chart shows 0.
           STATS_LINE=$(grep 'scenarios\.' /tmp/behave_output.txt | tail -n 1)
 
           PASSED_SCENARIOS=$(echo "$STATS_LINE" | grep -o '[0-9]\+ passed' | awk '{print $1}')
@@ -121,7 +122,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # FIX 3: Install JQ for JSON processing in the report job
+      # FIX: Install JQ for JSON processing in the report job
       - name: Install JQ
         run: sudo apt-get update && sudo apt-get install -y jq
 
@@ -166,7 +167,10 @@ jobs:
             REPORT_DIR_BUILD="$SITE_DIR/$BUILD_NUMBER/$OS"
             REPORT_DIR_LATEST="$SITE_DIR/latest/$OS"
             mkdir -p "$RESULTS_DIR" "$REPORT_DIR_BUILD" "$REPORT_DIR_LATEST"
-
+            
+            # This step correctly moves the content of the downloaded artifact (including summary.json)
+            cp -r reports/build-$OS/* "$REPORT_DIR_BUILD/" || true
+            
             # Fix: Preserve trend data from previous site
             if [ -d "site/latest/$OS/history" ]; then
               mkdir -p "$RESULTS_DIR/history"
@@ -176,7 +180,6 @@ jobs:
             REPO_NAME="${GITHUB_REPOSITORY##*/}"
             echo "{\"name\":\"$OS\",\"type\":\"GitHub Actions\",\"url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\",\"reportUrl\":\"https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/latest/$OS/\",\"buildOrder\":\"${BUILD_NUMBER}\",\"buildName\":\"Build ${BUILD_NUMBER} ($OS)\",\"buildUrl\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" > "$RESULTS_DIR/executor.json"
 
-            cp -r reports/build-$OS/* "$REPORT_DIR_BUILD/" || true
             cp -r "$REPORT_DIR_BUILD"/* "$REPORT_DIR_LATEST/" || true
             date -u > "$REPORT_DIR_BUILD/build-info.txt"
             date -u > "$REPORT_DIR_LATEST/build-info.txt"
@@ -236,7 +239,6 @@ jobs:
             TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "")
             TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
 
-            # ✅ FIX: Added date and time in PDT to the build list item
             echo "<li><strong>Build #${BUILD}</strong> (Run: $TS_DISPLAY) - <a href='${BUILD}/ubuntu-latest/'>Ubuntu</a> / <a href='${BUILD}/windows-latest/'>Windows</a></li>" >> "$SITE_DIR/index.html"
           done
           echo "</ul>" >> "$SITE_DIR/index.html"
@@ -248,8 +250,8 @@ jobs:
             TOTAL_UNSTABLE=0 
             
             for OS in ubuntu-latest windows-latest; do
-              # 💥 FIX 3: Correct path to summary.json (Removed /widgets/)
-              SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json"
+              # ✅ FIX 3: Correct path to summary.json (Removed /widgets/ from the path)
+              SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json" 
               
               if [ -f "$SUMMARY_FILE" ]; then
                 PASS_COUNT=$(jq -r '.statistic.passed // 0' "$SUMMARY_FILE" 2>/dev/null)
@@ -264,8 +266,9 @@ jobs:
             
             LABELS="$LABELS'$BUILD',"
             PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
-            FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
             UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
+            # The FAIL count will be added explicitly to the chart data as a separate line
+            FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
           done
 
           # The canvas is correctly wrapped in a controlled div
