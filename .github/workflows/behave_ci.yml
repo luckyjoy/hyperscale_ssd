@@ -85,83 +85,134 @@ jobs:
         with:
           path: reports
 
-      - name: Merge and generate build history
+      - name: Rebuild index.html with Trend Charts
+        shell: bash
         run: |
-          mkdir -p history
-          mkdir -p $SITE_DIR
-          HISTORY_JSON="history/history.json"
-          BUILD_NUMBER=${{ github.run_number }}
-          TIMESTAMP=$(TZ='America/Los_Angeles' date +"%Y-%m-%d %H:%M:%S PDT")
+          SITE_DIR="site"
+          CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
+          mkdir -p "$SITE_DIR"
 
-          # Create JSON if missing
-          if [ ! -f "$HISTORY_JSON" ]; then
-            echo "[]" > "$HISTORY_JSON"
-          fi
+          echo "<html><head><title>Hyperscale SSD Framework Reports History</title>
+          <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+          <style>
+          body{font-family:sans-serif;margin:20px;}
+          ul{list-style:none;padding:0;}
+          li{margin:6px 0;}
+          a{text-decoration:none;color:#0366d6;}
+          a:hover{text-decoration:underline;}
+          /* FIX: CSS to control the chart container's size and align left */
+          #chart-container {
+            max-width: 600px;
+            max-height: 300px;
+            margin: 0; /* Aligns the container to the left */
+          }
+          </style></head><body>
+          <h1>🤖 Hyperscale SSD CI/CD Build History</h1>
+          <h2>🧩 Latest Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
 
-          # Detect per-OS results from downloaded artifacts
-          UBUNTU_RESULT=$(cat reports/build-ubuntu-latest/status.txt 2>/dev/null || echo "UNKNOWN")
-          WINDOWS_RESULT=$(cat reports/build-windows-latest/status.txt 2>/dev/null || echo "UNKNOWN")
+          for OS in ubuntu-latest windows-latest; do
+            if [ -d "$SITE_DIR/latest/$OS" ]; then
+              TS_UTC=$(cat "$SITE_DIR/latest/$OS/build-info.txt" 2>/dev/null || echo "")
+              # Using '+%a %b %d %H:%M:%S PDT %Y' to explicitly show PDT/PST
+              TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "$TS_UTC")
+              echo "<li><strong><a href='latest/$OS/'>Latest Report ($OS)</a></strong> - Last run: $TS_DISPLAY</li>" >> "$SITE_DIR/index.html"
+            else
+              echo "<li><strong>$OS:</strong> (No report found)</li>" >> "$SITE_DIR/index.html"
+            fi
+          done
 
-          UBUNTU_LINK="reports/$BUILD_NUMBER/ubuntu-latest/validation_report.html"
-          WINDOWS_LINK="reports/$BUILD_NUMBER/windows-latest/validation_report.html"
-
-          jq --argjson build "$BUILD_NUMBER" \
-             --arg timestamp "$TIMESTAMP" \
-             --arg ur "$UBUNTU_RESULT" \
-             --arg wr "$WINDOWS_RESULT" \
-             --arg ul "$UBUNTU_LINK" \
-             --arg wl "$WINDOWS_LINK" \
-             '
-             (map(select(.build == $build)) | length) as $exists |
-             if $exists == 0 then
-               . + [{build: $build, timestamp: $timestamp, results: {"ubuntu-latest": $ur, "windows-latest": $wr}, links: {"ubuntu": $ul, "windows": $wl}}]
-             else
-               map(if .build == $build then
-                    .results["ubuntu-latest"] = $ur |
-                    .results["windows-latest"] = $wr |
-                    .timestamp = $timestamp |
-                    .links = {"ubuntu": $ul, "windows": $wl}
-                  else . end)
-             end
-             ' "$HISTORY_JSON" > tmp.json && mv tmp.json "$HISTORY_JSON"
-
-          # Generate HTML dashboard
-          python3 <<'EOF'
-          import json
-          from pathlib import Path
-          f = Path("history/history.json")
-          if not f.exists(): exit(0)
+          echo "</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2>" >> "$SITE_DIR/index.html"
+          # Fix: Sort builds newest to oldest for the list
+          BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr)
           
-          # FIX: Use read_text() to get content as a string, then use json.loads()
-          data = json.loads(f.read_text())
-          
-          data.sort(key=lambda x: x["build"], reverse=True)
+          echo "<ul>" >> "$SITE_DIR/index.html"
+          # Data for chart needs to be in ascending order (oldest to newest)
+          CHART_BUILDS=$(echo "$BUILDS" | sort -n)
+          LABELS=""
+          PASS_COUNTS=""
+          FAIL_COUNTS=""
+          UNSTABLE_COUNTS=""
 
-          html = ["<html><head><meta charset='UTF-8'><title>Hyperscale SSD Framework CI/CD History</title>",
-                  "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>",
-                  "<style>body{font-family:Arial;margin:20px;background:#f7f9fc;}table{border-collapse:collapse;width:100%;}th,td{border-bottom:1px solid #ddd;padding:8px;}</style></head><body>",
-                  "<h1>&#x1f6e0; Hyperscale SSD Framework CI/CD Build History</h1>",
-                  "<h2>&#x1f4ca; Latest Reports</h2><ul>"]
+          # Generate the visible list of links (newest to oldest)
+          for BUILD in $BUILDS; do
+            # Get the UTC time from the Ubuntu build info file and convert it
+            TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "")
+            TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
 
-          latest = data[0]
-          html.append(f"<li>Ubuntu: <a href='{latest['links']['ubuntu']}'>Report</a> ({latest['results'].get('ubuntu-latest','UNKNOWN')})</li>")
-          html.append(f"<li>Windows: <a href='{latest['links']['windows']}'>Report</a> ({latest['results'].get('windows-latest','UNKNOWN')})</li>")
-          html.append("</ul><h2>&#x1f36c; Build History</h2><table><tr><th>Build</th><th>Timestamp (PDT)</th><th>Ubuntu</th><th>Windows</th></tr>")
+            # ✅ FIX: Added date and time in PDT to the build list item
+            echo "<li><strong>Build #${BUILD}</strong> (Run: $TS_DISPLAY) - <a href='${BUILD}/ubuntu-latest/'>Ubuntu</a> / <a href='${BUILD}/windows-latest/'>Windows</a></li>" >> "$SITE_DIR/index.html"
+          done
+          echo "</ul>" >> "$SITE_DIR/index.html"
 
-          counts = {"PASS":0,"FAIL":0,"UNSTABLE":0}
-          for e in data:
-              u = e["results"].get("ubuntu-latest","UNKNOWN")
-              w = e["results"].get("windows-latest","UNKNOWN")
-              for s in (u,w):
-                  if s in counts: counts[s]+=1
-              html.append(f"<tr><td>#{e['build']}</td><td>{e['timestamp']}</td><td>{u}</td><td>{w}</td></tr>")
+          # Gather data for the chart (oldest to newest)
+          # Fix: Reads actual test statistics from Allure's summary.json
+          for BUILD in $CHART_BUILDS; do
+            TOTAL_PASS=0
+            TOTAL_FAIL=0   
+            TOTAL_UNSTABLE=0 
+            
+            for OS in ubuntu-latest windows-latest; do
+              SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/widgets/summary.json"
+              
+              if [ -f "$SUMMARY_FILE" ]; then
+                PASS_COUNT=$(jq -r '.statistic.passed // 0' "$SUMMARY_FILE" 2>/dev/null)
+                FAIL_COUNT=$(jq -r '.statistic.failed // 0' "$SUMMARY_FILE" 2>/dev/null)
+                BROKEN_COUNT=$(jq -r '.statistic.broken // 0' "$SUMMARY_FILE" 2>/dev/null)
 
-          html.append("</table><h2>&#x1f4c8; Trend Chart</h2><canvas id='trendChart' height='120'></canvas><script>const ctx=document.getElementById('trendChart');new Chart(ctx,{type:'bar',data:{labels:['PASS','FAIL','UNSTABLE'],datasets:[{label:'Count',data:[%d,%d,%d],backgroundColor:['#28a745','#dc3545','#ffc107']}]}});</script>" % (counts['PASS'],counts['FAIL'],counts['UNSTABLE']))
-          html.append("</body></html>")
-          Path("history.html").write_text("\n".join(html))
-          EOF
+                TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
+                TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
+                TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + BROKEN_COUNT))
+              fi
+            done
+            
+            LABELS="$LABELS'$BUILD',"
+            PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
+            FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
+            UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
+          done
 
-          cp -r reports history.html history $SITE_DIR/
+          # The canvas is correctly wrapped in a controlled div
+          echo "<div id='chart-container'>
+          <canvas id='trendChart'></canvas>
+          </div>
+          <script>
+          const ctx = document.getElementById('trendChart').getContext('2d');
+          new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: [${LABELS%,}],
+              datasets: [
+                {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', fill: false},
+                {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', fill: false},
+                {label: 'UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
+              ]
+            },
+            options: { 
+              responsive: true, 
+              maintainAspectRatio: false, 
+              plugins: { legend: { position: 'top' } }, 
+              scales: { 
+                y: { 
+                  beginAtZero: true, 
+                  stepSize: 1,
+                  // Y-axis title
+                  title: {
+                    display: true,
+                    text: 'Total Number of Tests'
+                  }
+                },
+                x: {
+                  // X-axis title
+                  title: {
+                    display: true,
+                    text: 'Build Number'
+                  }
+                }
+              } 
+            }
+          });
+          </script>
+          <hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
