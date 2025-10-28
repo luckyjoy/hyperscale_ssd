@@ -63,7 +63,7 @@ jobs:
           path: reports/${{ github.run_number }}/${{ matrix.os }}/
 
 
-  update-history:
+update-history:
     name: Update History and Deploy
     runs-on: ubuntu-latest
     needs: [test]
@@ -125,19 +125,22 @@ jobs:
           from pathlib import Path
           f = Path("history/history.json")
           if not f.exists(): exit(0)
-          data = json.load(f)
+          
+          # FIX: Use read_text() to get content as a string, then use json.loads()
+          data = json.loads(f.read_text())
+          
           data.sort(key=lambda x: x["build"], reverse=True)
 
           html = ["<html><head><meta charset='UTF-8'><title>Hyperscale SSD Framework CI/CD History</title>",
                   "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>",
                   "<style>body{font-family:Arial;margin:20px;background:#f7f9fc;}table{border-collapse:collapse;width:100%;}th,td{border-bottom:1px solid #ddd;padding:8px;}</style></head><body>",
-                  "<h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>",
-                  "<h2>🧩 Latest Reports</h2><ul>"]
+                  "<h1>&#x1f6e0; Hyperscale SSD Framework CI/CD Build History</h1>",
+                  "<h2>&#x1f4ca; Latest Reports</h2><ul>"]
 
           latest = data[0]
           html.append(f"<li>Ubuntu: <a href='{latest['links']['ubuntu']}'>Report</a> ({latest['results'].get('ubuntu-latest','UNKNOWN')})</li>")
           html.append(f"<li>Windows: <a href='{latest['links']['windows']}'>Report</a> ({latest['results'].get('windows-latest','UNKNOWN')})</li>")
-          html.append("</ul><h2>📜 Build History</h2><table><tr><th>Build</th><th>Timestamp (PDT)</th><th>Ubuntu</th><th>Windows</th></tr>")
+          html.append("</ul><h2>&#x1f36c; Build History</h2><table><tr><th>Build</th><th>Timestamp (PDT)</th><th>Ubuntu</th><th>Windows</th></tr>")
 
           counts = {"PASS":0,"FAIL":0,"UNSTABLE":0}
           for e in data:
@@ -147,7 +150,7 @@ jobs:
                   if s in counts: counts[s]+=1
               html.append(f"<tr><td>#{e['build']}</td><td>{e['timestamp']}</td><td>{u}</td><td>{w}</td></tr>")
 
-          html.append("</table><h2>📊 Trend Chart</h2><canvas id='trendChart' height='120'></canvas><script>const ctx=document.getElementById('trendChart');new Chart(ctx,{type:'bar',data:{labels:['PASS','FAIL','UNSTABLE'],datasets:[{label:'Count',data:[%d,%d,%d],backgroundColor:['#28a745','#dc3545','#ffc107']}]}});</script>" % (counts['PASS'],counts['FAIL'],counts['UNSTABLE']))
+          html.append("</table><h2>&#x1f4c8; Trend Chart</h2><canvas id='trendChart' height='120'></canvas><script>const ctx=document.getElementById('trendChart');new Chart(ctx,{type:'bar',data:{labels:['PASS','FAIL','UNSTABLE'],datasets:[{label:'Count',data:[%d,%d,%d],backgroundColor:['#28a745','#dc3545','#ffc107']}]}});</script>" % (counts['PASS'],counts['FAIL'],counts['UNSTABLE']))
           html.append("</body></html>")
           Path("history.html").write_text("\n".join(html))
           EOF
@@ -167,7 +170,7 @@ jobs:
         if: always()
         run: |
           PAGE_URL="${{ steps.deployment.outputs.page_url }}"
-          echo "### 💾 Hyperscale SSD Framework CI/CD Summary" >> $GITHUB_STEP_SUMMARY
+          echo "### &#x1f6a6; Hyperscale SSD Framework CI/CD Summary" >> $GITHUB_STEP_SUMMARY
           echo "[![Ubuntu Report](https://img.shields.io/badge/Ubuntu-Latest-blue)](${PAGE_URL}/reports/${{ github.run_number }}/ubuntu-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
           echo "[![Windows Report](https://img.shields.io/badge/Windows-Latest-blue)](${PAGE_URL}/reports/${{ github.run_number }}/windows-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
           echo "[![History](https://img.shields.io/badge/View-History-green)](${PAGE_URL}/history.html)" >> $GITHUB_STEP_SUMMARY
