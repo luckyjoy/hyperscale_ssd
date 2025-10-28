@@ -44,10 +44,12 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Install dependencies
+        shell: bash
         run: |
+          set +e
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # Install jq for JSON handling
+          # Ensure 'jq' is installed for robust JSON generation on Linux
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             sudo apt-get update
             sudo apt-get install -y jq
