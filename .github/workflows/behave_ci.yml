@@ -148,7 +148,7 @@ jobs:
             date -u > "$REPORT_DIR_LATEST/build-info.txt"
           done
 
-       - name: Rebuild index.html with Trend Charts
+      - name: Rebuild index.html with Trend Charts
         shell: bash
         run: |
           SITE_DIR="site"
