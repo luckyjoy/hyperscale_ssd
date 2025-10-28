@@ -1,167 +1,197 @@
-name: SSD Hyperscale Automation Framework By Bang Thien Nguyen
+name: Hyperscale SSD Framework CI/CD
 
 on:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main ]
-  schedule:
-    - cron: '0 8 * * *'  # 1:00 AM PT daily
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
 env:
   SITE_DIR: site
-  HISTORY_FILE: site/history.json
 
 jobs:
   test:
-    name: Run Behave Tests on ${{ matrix.os }}
+    name: Validate on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
 
     outputs:
-      test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }}
+      test_outcome: ${{ steps.set_outcome.outputs.test_outcome }}
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install behave-html-pretty-formatter
+          pip install -r requirements.txt pytest pytest-json-report
 
-      - name: Run Behave Tests
-        id: run_behave_tests
+      - name: Run Tests
+        id: run_tests
+        run: |
+          mkdir -p test-results
+          pytest --json-report --json-report-file=test-results/report.json || echo "Tests completed with errors"
+
+      - name: Determine test outcome
+        id: set_outcome
         shell: bash
         run: |
-          set +e
-          OS_NAME=${{ matrix.os }}
-          BUILD_NUMBER=${{ github.run_number }}
-          REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
-          REPORT_PATH="$REPORT_DIR/validation_report.html"
-          STATS_FILE="$REPORT_DIR/stats.txt"
-
-          mkdir -p "$REPORT_DIR"
-          behave --tags=@adv --exclude "features/manual_tests" \
-            --format behave_html_pretty_formatter:PrettyHTMLFormatter \
-            -o "$REPORT_PATH" --no-capture | tee /tmp/behave_output.txt
-          TEST_EXIT_CODE=$?
-
-          grep 'Features:' /tmp/behave_output.txt | sed 's/Features: //' > "$STATS_FILE"
-
-          # Determine result based on your PASS/UNSTABLE/FAIL policy
-          if [ $TEST_EXIT_CODE -ne 0 ]; then
-            if grep -q "failed" /tmp/behave_output.txt; then
-                RESULT=UNSTABLE
-            else
-                RESULT=FAIL
-            fi
-          else
-            RESULT=PASS
+          REPORT="test-results/report.json"
+          if [ ! -f "$REPORT" ]; then
+            echo "test_outcome=FAIL" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
-          echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
-          exit 0
+          FAIL_COUNT=$(jq '.summary.failed' "$REPORT")
+          ERROR_COUNT=$(jq '.summary.errors' "$REPORT")
+          PASS_COUNT=$(jq '.summary.passed' "$REPORT")
 
-      - name: Upload validation report
-        uses: actions/upload-artifact@v4
-        with:
-          name: validation-report-${{ matrix.os }}
-          path: reports/${{ github.run_number }}/${{ matrix.os }}
+          if (( FAIL_COUNT > 0 || ERROR_COUNT > 0 )); then
+            echo "test_outcome=UNSTABLE" >> $GITHUB_OUTPUT
+          elif (( PASS_COUNT > 0 )); then
+            echo "test_outcome=PASS" >> $GITHUB_OUTPUT
+          else
+            echo "test_outcome=FAIL" >> $GITHUB_OUTPUT
+          fi
 
-  report:
-    name: Generate History Dashboard & Deploy
+      - name: Save test artifacts
+        run: |
+          BUILD_DIR="${SITE_DIR}/${GITHUB_RUN_NUMBER}/${{ matrix.os }}"
+          mkdir -p "$BUILD_DIR"
+          cp test-results/report.json "$BUILD_DIR/"
+          date -u > "$BUILD_DIR/build-info.txt"
+
+      - name: Save latest pointer
+        if: always()
+        run: |
+          LATEST_DIR="${SITE_DIR}/latest/${{ matrix.os }}"
+          mkdir -p "$LATEST_DIR"
+          cp -r test-results/* "$LATEST_DIR/"
+          date -u > "$LATEST_DIR/build-info.txt"
+
+  build_dashboard:
+    name: Build Dashboard
     runs-on: ubuntu-latest
     needs: test
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    permissions:
-      contents: write
-      pages: write
-      id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Download artifacts
+      - name: Download previous artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: site
 
-      - name: Restore existing history (if any)
+      - name: Rebuild index.html with Trend Charts
+        shell: bash
         run: |
-          mkdir -p ${{ env.SITE_DIR }}
-          if [ -f ${{ env.HISTORY_FILE }} ]; then
-            echo "Existing history found"
-          else
-            echo "[]" > ${{ env.HISTORY_FILE }}
-          fi
+          SITE_DIR="site"
+          CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
+          mkdir -p "$SITE_DIR"
 
-      - name: Update build history JSON
-        id: update_history
-        run: |
-          BUILD_NUM=${{ github.run_number }}
-          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          RESULT="${{ needs.test.outputs.test_outcome }}"
-          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "<html><head><title>Hyperscale SSD Framework Reports History</title>
+          <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+          <style>
+          body{font-family:sans-serif;margin:20px;}
+          ul{list-style:none;padding:0;}
+          li{margin:6px 0;}
+          a{text-decoration:none;color:#0366d6;}
+          a:hover{text-decoration:underline;}
+          #chart-container{max-width:600px;max-height:300px;margin:0;}
+          </style></head><body>
+          <h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>
+          <h2>🧩 Latest Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
 
-          jq --arg build "$BUILD_NUM" \
-             --arg result "$RESULT" \
-             --arg time "$TIMESTAMP" \
-             --arg url "$RUN_URL" \
-             '. += [{"build": ($build|tonumber), "result": $result, "time": $time, "url": $url}]' \
-             ${{ env.HISTORY_FILE }} > temp.json
-          mv temp.json ${{ env.HISTORY_FILE }}
-
-      - name: Build dashboard HTML
-        run: |
-          SITE=${{ env.SITE_DIR }}
-          mkdir -p "$SITE/latest"
-          HISTORY=${{ env.HISTORY_FILE }}
-
-          echo "<!DOCTYPE html><html><head><meta charset='UTF-8'>" > "$SITE/index.html"
-          echo "<title>SSD Validation Dashboard</title>" >> "$SITE/index.html"
-          echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>" >> "$SITE/index.html"
-          echo "<style>body{font-family:Segoe UI,Arial;margin:40px;}canvas{max-width:800px;}h2{border-bottom:1px solid #ccc;}a{text-decoration:none;color:#1565C0;}.legend{display:inline-block;margin-right:10px;padding:4px 8px;border-radius:4px;}.pass{background:#4CAF50;color:white;}.fail{background:#F44336;color:white;}.unstable{background:#FFC107;color:black;}</style></head><body>" >> "$SITE/index.html"
-
-          echo "<h2>🌿 SSD Hyperscale Automation Framework</h2>" >> "$SITE/index.html"
-          echo "<p>Last updated: $(TZ='America/Los_Angeles' date '+%a %b %d %T PDT %Y')</p>" >> "$SITE/index.html"
-
-          echo "<div><span class='legend pass'>PASS</span><span class='legend fail'>FAIL</span><span class='legend unstable'>UNSTABLE</span></div>" >> "$SITE/index.html"
-          echo "<canvas id='trendChart'></canvas>" >> "$SITE/index.html"
-
-          echo "<script>" >> "$SITE/index.html"
-          echo "fetch('history.json').then(r=>r.json()).then(data=>{" >> "$SITE/index.html"
-          echo "data.sort((a,b)=>a.build-b.build);" >> "$SITE/index.html"
-          echo "const builds=data.map(d=>d.build);" >> "$SITE/index.html"
-          echo "const passCounts=data.map((d,i)=>data.slice(0,i+1).filter(x=>x.result==='PASS').length);" >> "$SITE/index.html"
-          echo "const failCounts=data.map((d,i)=>data.slice(0,i+1).filter(x=>x.result==='FAIL').length);" >> "$SITE/index.html"
-          echo "const unstableCounts=data.map((d,i)=>data.slice(0,i+1).filter(x=>x.result==='UNSTABLE').length);" >> "$SITE/index.html"
-          echo "new Chart(document.getElementById('trendChart'),{type:'line',data:{labels:builds,datasets:[" >> "$SITE/index.html"
-          echo "{label:'PASS',data:passCounts,borderColor:'#4CAF50',tension:0.1,fill:false}," >> "$SITE/index.html"
-          echo "{label:'FAIL',data:failCounts,borderColor:'#F44336',tension:0.1,fill:false}," >> "$SITE/index.html"
-          echo "{label:'UNSTABLE',data:unstableCounts,borderColor:'#FFC107',tension:0.1,fill:false}" >> "$SITE/index.html"
-          echo "]},options:{plugins:{legend:{display:true}},scales:{x:{title:{display:true,text:'Build #'}},y:{title:{display:true,text:'Cumulative Count'}}}}});" >> "$SITE/index.html"
-          echo "});</script>" >> "$SITE/index.html"
-
-          echo "<h3>Latest Reports</h3><ul>" >> "$SITE/index.html"
           for OS in ubuntu-latest windows-latest; do
-            mkdir -p "$SITE/latest/$OS"
-            cp -r artifacts/validation-report-$OS/* "$SITE/latest/$OS/" || true
-            echo "<li><a href='latest/$OS/validation_report.html'>Latest Report ($OS)</a></li>" >> "$SITE/index.html"
+            if [ -d "$SITE_DIR/latest/$OS" ]; then
+              TS_UTC=$(cat "$SITE_DIR/latest/$OS/build-info.txt" 2>/dev/null || echo "")
+              TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "$TS_UTC")
+              echo "<li><strong><a href='latest/$OS/report.json'>Latest Report ($OS)</a></strong> - Last run: $TS_DISPLAY</li>" >> "$SITE_DIR/index.html"
+            else
+              echo "<li><strong>$OS:</strong> (No report found)</li>" >> "$SITE_DIR/index.html"
+            fi
           done
-          echo "</ul><p style='font-size:12px;color:#777;'>Generated $(TZ='America/Los_Angeles' date)</p></body></html>" >> "$SITE/index.html"
+
+          echo "</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2>" >> "$SITE_DIR/index.html"
+          BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr)
+          echo "<ul>" >> "$SITE_DIR/index.html"
+
+          CHART_BUILDS=$(echo "$BUILDS" | sort -n)
+          LABELS=""
+          PASS_COUNTS=""
+          FAIL_COUNTS=""
+          UNSTABLE_COUNTS=""
+
+          for BUILD in $BUILDS; do
+            TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "")
+            TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
+            echo "<li><strong>Build #${BUILD}</strong> (Run: $TS_DISPLAY) - <a href='${BUILD}/ubuntu-latest/report.json'>Ubuntu</a> / <a href='${BUILD}/windows-latest/report.json'>Windows</a></li>" >> "$SITE_DIR/index.html"
+          done
+
+          echo "</ul>" >> "$SITE_DIR/index.html"
+
+          for BUILD in $CHART_BUILDS; do
+            TOTAL_PASS=0
+            TOTAL_FAIL=0
+            TOTAL_UNSTABLE=0
+
+            for OS in ubuntu-latest windows-latest; do
+              REPORT_FILE="$SITE_DIR/$BUILD/$OS/report.json"
+              if [ -f "$REPORT_FILE" ]; then
+                PASS=$(jq '.summary.passed' "$REPORT_FILE" 2>/dev/null || echo 0)
+                FAIL=$(jq '.summary.failed' "$REPORT_FILE" 2>/dev/null || echo 0)
+                ERROR=$(jq '.summary.errors' "$REPORT_FILE" 2>/dev/null || echo 0)
+
+                TOTAL_PASS=$((TOTAL_PASS + PASS))
+                TOTAL_FAIL=$((TOTAL_FAIL + FAIL))
+                TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + ERROR))
+              fi
+            done
+
+            LABELS="$LABELS'$BUILD',"
+            PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
+            FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
+            UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
+          done
+
+          echo "<div id='chart-container'><canvas id='trendChart'></canvas></div>
+          <script>
+          const ctx = document.getElementById('trendChart').getContext('2d');
+          new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: [${LABELS%,}],
+              datasets: [
+                {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', fill: false},
+                {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', fill: false},
+                {label: 'UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
+              ]
+            },
+            options: {responsive:true, maintainAspectRatio:false,
+              plugins:{legend:{position:'top'}},
+              scales:{
+                y:{beginAtZero:true, title:{display:true, text:'Total Tests'}},
+                x:{title:{display:true, text:'Build Number'}}
+              }
+            }
+          });
+          </script>
+          <hr><p><em>Generated on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -176,9 +206,9 @@ jobs:
         if: always()
         run: |
           PAGE_URL="${{ steps.deployment.outputs.page_url }}"
-          echo "### 💾 SSD Validation CI/CD Summary" >> $GITHUB_STEP_SUMMARY
-          echo "[![Ubuntu Report](https://img.shields.io/badge/Ubuntu-Latest-blue)](${PAGE_URL}/latest/ubuntu-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
-          echo "[![Windows Report](https://img.shields.io/badge/Windows-Latest-blue)](${PAGE_URL}/latest/windows-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
+          echo "### 💾 Hyperscale SSD Framework CI/CD Summary" >> $GITHUB_STEP_SUMMARY
+          echo "[![Ubuntu Report](https://img.shields.io/badge/Ubuntu-Latest-blue)](${PAGE_URL}/latest/ubuntu-latest/report.json)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Windows Report](https://img.shields.io/badge/Windows-Latest-blue)](${PAGE_URL}/latest/windows-latest/report.json)" >> $GITHUB_STEP_SUMMARY
           echo "[![History](https://img.shields.io/badge/View-History-green)](${PAGE_URL}/)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Build #${{ github.run_number }} Result:** ${{ needs.test.outputs.test_outcome }}" >> $GITHUB_STEP_SUMMARY
