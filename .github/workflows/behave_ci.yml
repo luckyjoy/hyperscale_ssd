@@ -133,7 +133,7 @@ jobs:
         if: always()
         run: |
           mkdir -p history
-          HISTORY_FILE=history/history.json
+          HISTORY_JSON="history/history.json"
           BUILD_DIR="latest"
 
           # Get current time in PDT
@@ -149,64 +149,79 @@ jobs:
             RESULT="UNSTABLE"
           fi
 
-          # Append to history.json
-          echo "Updating build history..."
-          jq --arg bn "${{ github.run_number }}" \
-             --arg ts "$TIMESTAMP" \
-             --arg st "$RESULT" \
-             --arg ul "${{ env.SITE_DIR }}/ubuntu-latest/validation_report.html" \
-             --arg wl "${{ env.SITE_DIR }}/windows-latest/validation_report.html" \
-             '. + [{"build":$bn, "timestamp":$ts, "status":$st, "ubuntu_link":$ul, "windows_link":$wl}]' \
-             history.json 2>/dev/null | jq 'unique_by(.build) | sort_by(.build)' > history.tmp || \
-             echo '[{"build":'${{ github.run_number }}',"timestamp":"'$TIMESTAMP'","status":"'$RESULT'"}]' > history.tmp
+          # Create new entry
+          ENTRY=$(jq -n \
+            --arg build "${{ github.run_number }}" \
+            --arg timestamp "$TIMESTAMP" \
+            --arg status "$RESULT" \
+            --arg ul "latest/ubuntu-latest/validation_report.html" \
+            --arg wl "latest/windows-latest/validation_report.html" \
+            '{build: ($build|tonumber), timestamp: $timestamp, status: $status, ubuntu_link: $ul, windows_link: $wl}')
 
-          mv history.tmp history.json
+          # Merge safely with existing history (if any)
+          if [ -f "$HISTORY_JSON" ] && [ -s "$HISTORY_JSON" ]; then
+            jq ". + [$ENTRY] | unique_by(.build) | sort_by(.build)" "$HISTORY_JSON" > history.tmp
+          else
+            echo "[]" > history.tmp
+            jq ". + [$ENTRY]" history.tmp > history.tmp2 && mv history.tmp2 history.tmp
+          fi
 
-          # Create history.html
+          mv history.tmp "$HISTORY_JSON"
+
+          # Generate HTML summary
           python3 <<'EOF'
-          import json, datetime, pytz
+          import json, os
           from pathlib import Path
 
-          data = json.load(open("history.json"))
+          path = Path("history/history.json")
+          if not path.exists() or path.stat().st_size == 0:
+              data = []
+          else:
+              with open(path) as f:
+                  data = json.load(f)
+
+          if not data:
+              print("⚠️ No builds found, creating placeholder HTML...")
+              Path("history.html").write_text("<html><body><h1>No builds yet</h1></body></html>")
+              exit(0)
+
           data.sort(key=lambda x: x["build"], reverse=True)
           latest = data[0]
 
-          html = """
+          html = f"""
           <html>
           <head>
             <meta charset="UTF-8">
             <title>Hyperscale SSD Framework CI/CD History</title>
             <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
             <style>
-              body { font-family: Arial, sans-serif; margin: 30px; background: #f5f7fa; }
-              h1, h2 { color: #333; }
-              table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-              th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
-              .pass { color: green; }
-              .fail { color: red; }
-              .unstable { color: orange; }
+              body {{ font-family: Arial, sans-serif; margin: 30px; background: #f5f7fa; }}
+              h1, h2 {{ color: #333; }}
+              table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
+              th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
+              .pass {{ color: green; }}
+              .fail {{ color: red; }}
+              .unstable {{ color: orange; }}
             </style>
           </head>
           <body>
             <h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>
             <h2>🧩 Latest Reports</h2>
             <ul>
-              <li>Ubuntu: <a href="{ul}">{ul}</a></li>
-              <li>Windows: <a href="{wl}">{wl}</a></li>
+              <li>Ubuntu: <a href="{latest['ubuntu_link']}">{latest['ubuntu_link']}</a></li>
+              <li>Windows: <a href="{latest['windows_link']}">{latest['windows_link']}</a></li>
             </ul>
 
             <h2>📜 Build History</h2>
             <table>
               <tr><th>Build</th><th>Timestamp (PDT)</th><th>Status</th></tr>
-          """.format(ul=latest["ubuntu_link"], wl=latest["windows_link"])
+          """
 
+          counts = {"PASS": 0, "FAIL": 0, "UNSTABLE": 0}
           for entry in data:
+              counts[entry["status"]] = counts.get(entry["status"], 0) + 1
               cls = entry["status"].lower()
               html += f'<tr><td><a href="{entry["ubuntu_link"]}">#{entry["build"]}</a></td><td>{entry["timestamp"]}</td><td class="{cls}">{entry["status"]}</td></tr>'
-
-          # Trend chart data
-          counts = {"PASS":0, "FAIL":0, "UNSTABLE":0}
-          for e in data: counts[e["status"]] = counts.get(e["status"], 0)+1
 
           html += f"""
             </table>
@@ -233,11 +248,11 @@ jobs:
             </script>
           </body></html>
           """
+
           Path("history.html").write_text(html)
           EOF
 
-          cp history.json history.html ${{ env.SITE_DIR }}/
-
+          cp history.html "$HISTORY_JSON" ${{ env.SITE_DIR }}/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
