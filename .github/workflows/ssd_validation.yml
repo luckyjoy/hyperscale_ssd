@@ -103,7 +103,7 @@ jobs:
           retention-days: 7
 
 ---
-  # Job 2: Generates Dashboard and Deploys (This job is missing in your current file)
+  # Job 2: Generates Dashboard and Deploys (THIS IS THE MISSING JOB)
   report:
     name: Generate History Dashboard & Deploy
     runs-on: ubuntu-latest
@@ -228,7 +228,7 @@ jobs:
                 FAIL_COUNT=$(grep -oE '[0-9]+ failed' "$STATS_FILE" | awk '{print $1}')
                 
                 TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
-                TOTAL_FAIL=$((TOTAL_FAIL + FAIL_FAIL))
+                TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
               fi
             done
             
@@ -279,6 +279,7 @@ jobs:
 
       - name: Add Workflow Summary (Badges)
         run: |
+          # THIS STEP POSTS THE BADGES!
           PAGE_URL=${{ steps.deployment.outputs.page_url }}
           BASE_URL="${PAGE_URL%/}"
           TEST_STATUS=${{ needs.test.outputs.test_outcome }}
@@ -301,4 +302,3 @@ jobs:
           echo "[![Report History](https://img.shields.io/badge/All-Builds-green)](${BASE_URL}/)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Build #${{ github.run_number }} | Status: $STATUS_ICON $STATUS_TEXT" >> $GITHUB_STEP_SUMMARY
-
