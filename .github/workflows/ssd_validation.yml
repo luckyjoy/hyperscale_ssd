@@ -16,72 +16,70 @@ env:
 
 jobs:
   test:
-    name: Validate on ${{ matrix.os }}
+    name: Run Behave Tests on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
 
     outputs:
-      test_outcome: ${{ steps.set_outcome.outputs.test_outcome }}
+      test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pytest pytest-json-report
+          pip install -r requirements.txt
+          pip install behave-html-pretty-formatter
 
-      - name: Run Tests
-        id: run_tests
-        run: |
-          mkdir -p test-results
-          pytest --json-report --json-report-file=test-results/report.json || echo "Tests completed with errors"
-
-      - name: Determine test outcome
-        id: set_outcome
+      - name: Run Behave Tests
+        id: run_behave_tests
         shell: bash
         run: |
-          REPORT="test-results/report.json"
-          if [ ! -f "$REPORT" ]; then
-            echo "test_outcome=FAIL" >> $GITHUB_OUTPUT
-            exit 0
-          fi
+          set +e
+          OS_NAME=${{ matrix.os }}
+          BUILD_NUMBER=${{ github.run_number }}
+          REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
+          REPORT_PATH="$REPORT_DIR/validation_report.html"
+          STATS_FILE="$REPORT_DIR/stats.txt"
 
-          FAIL_COUNT=$(jq '.summary.failed' "$REPORT")
-          ERROR_COUNT=$(jq '.summary.errors' "$REPORT")
-          PASS_COUNT=$(jq '.summary.passed' "$REPORT")
+          mkdir -p "$REPORT_DIR"
+          behave --tags=@adv --exclude "features/manual_tests" \
+            --format behave_html_pretty_formatter:PrettyHTMLFormatter \
+            -o "$REPORT_PATH" --no-capture | tee /tmp/behave_output.txt
+          TEST_EXIT_CODE=$?
 
-          if (( FAIL_COUNT > 0 || ERROR_COUNT > 0 )); then
-            echo "test_outcome=UNSTABLE" >> $GITHUB_OUTPUT
-          elif (( PASS_COUNT > 0 )); then
-            echo "test_outcome=PASS" >> $GITHUB_OUTPUT
+          grep 'Features:' /tmp/behave_output.txt | sed 's/Features: //' > "$STATS_FILE"
+
+          if [ $TEST_EXIT_CODE -ne 0 ]; then
+            if grep -q "failed" /tmp/behave_output.txt; then
+                RESULT=UNSTABLE
+            else
+                RESULT=FAIL
+            fi
           else
-            echo "test_outcome=FAIL" >> $GITHUB_OUTPUT
+            RESULT=PASS
           fi
+          echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
+          exit 0
 
-      - name: Save test artifacts
-        run: |
-          BUILD_DIR="${SITE_DIR}/${GITHUB_RUN_NUMBER}/${{ matrix.os }}"
-          mkdir -p "$BUILD_DIR"
-          cp test-results/report.json "$BUILD_DIR/"
-          date -u > "$BUILD_DIR/build-info.txt"
+      - name: Create Timestamp
+        run: echo "$(date -u)" > timestamp.txt
 
-      - name: Save latest pointer
-        if: always()
-        run: |
-          LATEST_DIR="${SITE_DIR}/latest/${{ matrix.os }}"
-          mkdir -p "$LATEST_DIR"
-          cp -r test-results/* "$LATEST_DIR/"
-          date -u > "$LATEST_DIR/build-info.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: timestamp-${{ matrix.os }}
+          path: timestamp.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validation-report-${{ matrix.os }}
+          path: reports/${{ github.run_number }}/${{ matrix.os }}
 
   build_dashboard:
     name: Build Dashboard
