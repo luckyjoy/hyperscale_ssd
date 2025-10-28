@@ -102,7 +102,6 @@ jobs:
           path: reports/${{ github.run_number }}/${{ matrix.os }}
           retention-days: 7
 
----
   # Job 2: Generates Dashboard and Deploys
   report:
     name: Generate History Dashboard & Deploy
