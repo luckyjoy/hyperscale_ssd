@@ -2,241 +2,115 @@ name: SSD Hyperscale Automation Framework By Bang Thien Nguyen
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
-  schedule:
-    - cron: '0 8 * * *'  # 1:00 AM PT daily
-
-permissions:
-  contents: write
-  pages: write
-  id-token: write
-
-env:
-  SITE_DIR: site
-  HISTORY_FILE: site/history.json
+    branches: [ main, develop ]
+  workflow_dispatch:
 
 jobs:
-  test:
-    name: Run Behave Tests on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+  build-and-test:
+    name: 🧪 SSD Validation
+    runs-on: ubuntu-latest
 
-    outputs:
-      test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }}
+    env:
+      PYTHONPATH: .
+      ALLURE_RESULTS: allure-results
+      ALLURE_REPORT: allure-report
+      DOCKER_BUILDKIT: 1
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install behave-html-pretty-formatter
+          pip install pytest allure-pytest
 
-      - name: Run Behave Tests
-        id: run_behave_tests
-        shell: bash
+      - name: Build Docker Image
         run: |
-          set +e
-          OS_NAME=${{ matrix.os }}
-          BUILD_NUMBER=${{ github.run_number }}
-          REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
-          REPORT_PATH="$REPORT_DIR/validation_report.html"
-          STATS_FILE="$REPORT_DIR/stats.txt"
+          echo "[Docker Build Status] Step 1/3 (33%) Task: Building Image..."
+          docker build -t ssd-validation:latest .
 
-          mkdir -p "$REPORT_DIR"
-          behave --tags=@adv --exclude "features/manual_tests" \
-            --format behave_html_pretty_formatter:PrettyHTMLFormatter \
-            -o "$REPORT_PATH" --no-capture | tee /tmp/behave_output.txt
-          TEST_EXIT_CODE=$?
-
-          grep 'Features:' /tmp/behave_output.txt | sed 's/Features: //' > "$STATS_FILE"
-
-          if [ $TEST_EXIT_CODE -ne 0 ]; then
-            if grep -q "failed" /tmp/behave_output.txt; then
-                RESULT=UNSTABLE
-            else
-                RESULT=FAIL
-            fi
-          else
-            RESULT=PASS
-          fi
-          echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
-          exit 0
-
-      - name: Create Timestamp
-        run: echo "$(date -u)" > timestamp.txt
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: timestamp-${{ matrix.os }}
-          path: timestamp.txt
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: validation-report-${{ matrix.os }}
-          path: reports/${{ github.run_number }}/${{ matrix.os }}
-
-  report:
-    name: Generate History Dashboard & Deploy
-    runs-on: ubuntu-latest
-    needs: test
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    permissions:
-      contents: write
-      pages: write
-      id-token: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Restore existing history (if any)
+      - name: Run Tests (Pytest + Allure)
+        id: tests
         run: |
-          mkdir -p ${{ env.SITE_DIR }}
-          if [ -f ${{ env.HISTORY_FILE }} ]; then
-            echo "History found"
-          else
-            echo "[]" > ${{ env.HISTORY_FILE }}
-          fi
+          mkdir -p $ALLURE_RESULTS
+          pytest --maxfail=1 --disable-warnings -q --alluredir=$ALLURE_RESULTS || echo "TESTS_FAILED=true" >> $GITHUB_ENV
 
-      - name: Update build history JSON
-        id: update_history
-        run: |
-          BUILD_NUM=${{ github.run_number }}
-          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          RESULT="${{ needs.test.outputs.test_outcome }}"
-          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-          jq --arg build "$BUILD_NUM" \
-             --arg result "$RESULT" \
-             --arg time "$TIMESTAMP" \
-             --arg url "$RUN_URL" \
-             '. += [{"build": $build|tonumber, "result": $result, "time": $time, "url": $url}]' \
-             ${{ env.HISTORY_FILE }} > temp.json
-          mv temp.json ${{ env.HISTORY_FILE }}
-
-      - name: Build dashboard HTML
-        run: |
-          SITE=${{ env.SITE_DIR }}
-          mkdir -p "$SITE/latest"
-          HISTORY=${{ env.HISTORY_FILE }}
-
-          # Create header
-          {
-            echo "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
-            echo "<title>SSD Validation Dashboard</title>"
-            echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
-            echo "<style>"
-            echo "body{font-family:Segoe UI,Arial;margin:40px;}"
-            echo "h2{border-bottom:1px solid #ccc;padding-bottom:4px;}"
-            echo "a{text-decoration:none;color:#1565C0;}"
-            echo ".legend{display:inline-block;margin-right:10px;padding:4px 8px;border-radius:4px;}"
-            echo ".pass{background:#4CAF50;color:white;}"
-            echo ".fail{background:#F44336;color:white;}"
-            echo ".unstable{background:#FFC107;color:black;}"
-            echo "canvas{max-width:800px;}"
-            echo "</style></head><body>"
-            echo "<h2>🌿 Latest Hyperscale SSD Framework Reports</h2>"
-            echo "<p><a href='latest/ubuntu-latest/validation_report.html'>Latest Report (ubuntu-latest)</a>"
-            echo " - Last run: $(TZ='America/Los_Angeles' date '+%a %b %d %T PDT %Y')</p>"
-            echo "<p><a href='latest/windows-latest/validation_report.html'>Latest Report (windows-latest)</a>"
-            echo " - Last run: $(TZ='America/Los_Angeles' date '+%a %b %d %T PDT %Y')</p>"
-            echo "<br><h2>📊 Report History & Trends (Times in PDT)</h2>"
-          } > "$SITE/index.html"
-
-          # Generate build list
-          echo "<ul>" >> "$SITE/index.html"
-          jq -r '.[] | "Build #\(.build) (Run: \(.time) PDT) – <a href=\"\(.url)\">Details</a> – <a href=\"latest/ubuntu-latest/validation_report.html\">Ubuntu</a> / <a href=\"latest/windows-latest/validation_report.html\">Windows</a>"' \
-            $HISTORY | tac | while read -r line; do
-              echo "<li>$line</li>" >> "$SITE/index.html"
-          done
-          echo "</ul><br>" >> "$SITE/index.html"
-
-          # Chart
-          echo "<div><span class='legend pass'>PASS</span><span class='legend fail'>FAIL</span><span class='legend unstable'>UNSTABLE</span></div>" >> "$SITE/index.html"
-          echo "<canvas id='trendChart'></canvas>" >> "$SITE/index.html"
-          echo "<script>" >> "$SITE/index.html"
-          echo "fetch('history.json').then(r=>r.json()).then(data=>{" >> "$SITE/index.html"
-          echo "data.sort((a,b)=>a.build-b.build);" >> "$SITE/index.html"
-          echo "const builds=data.map(d=>d.build);" >> "$SITE/index.html"
-          echo "const passCounts=data.map((d,i)=>data.slice(0,i+1).filter(x=>x.result==='PASS').length);" >> "$SITE/index.html"
-          echo "const failCounts=data.map((d,i)=>data.slice(0,i+1).filter(x=>x.result==='FAIL').length);" >> "$SITE/index.html"
-          echo "const unstableCounts=data.map((d,i)=>data.slice(0,i+1).filter(x=>x.result==='UNSTABLE').length);" >> "$SITE/index.html"
-          echo "new Chart(document.getElementById('trendChart'),{type:'line',data:{labels:builds,datasets:["
-          echo "{label:'PASS',data:passCounts,borderColor:'#4CAF50',backgroundColor:'#4CAF50',tension:0.1,fill:false},"
-          echo "{label:'FAIL',data:failCounts,borderColor:'#F44336',backgroundColor:'#F44336',tension:0.1,fill:false},"
-          echo "{label:'UNSTABLE',data:unstableCounts,borderColor:'#FFC107',backgroundColor:'#FFC107',tension:0.1,fill:false}"
-          echo "]},options:{plugins:{legend:{display:false}},scales:{x:{title:{display:true,text:'Build Number'}},y:{title:{display:true,text:'Total Number of Tests'}}}}});"
-          echo "});</script>" >> "$SITE/index.html"
-
-          echo "<p style='margin-top:40px;font-size:12px;color:#666;'>Generated automatically on $(TZ='America/Los_Angeles' date '+%a %b %d %T PDT %Y')</p>" >> "$SITE/index.html"
-          echo "</body></html>" >> "$SITE/index.html"
-
-          # Copy reports to latest/
-          for OS in ubuntu-latest windows-latest; do
-            mkdir -p "$SITE/latest/$OS"
-            cp -r artifacts/validation-report-$OS/* "$SITE/latest/$OS/" || true
-          done
-
-
-        run: |
-          SITE=${{ env.SITE_DIR }}
-          mkdir -p "$SITE/latest"
-
-          echo "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>SSD Validation Dashboard</title>" > "$SITE/index.html"
-          echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>" >> "$SITE/index.html"
-          echo "<style>body{font-family:Segoe UI,Arial;margin:40px;}canvas{max-width:600px;}</style></head><body>" >> "$SITE/index.html"
-
-          echo "<h1>💾 SSD Hyperscale Automation Framework</h1>" >> "$SITE/index.html"
-          echo "<h3>Build History Trend</h3><canvas id='trendChart'></canvas>" >> "$SITE/index.html"
-          echo "<script>" >> "$SITE/index.html"
-          echo "fetch('history.json').then(r=>r.json()).then(data=>{" >> "$SITE/index.html"
-          echo "const builds=data.map(d=>d.build);const results=data.map(d=>d.result);" >> "$SITE/index.html"
-          echo "const passCount=data.filter(d=>d.result==='PASS').length;" >> "$SITE/index.html"
-          echo "const failCount=data.filter(d=>d.result==='FAIL').length;" >> "$SITE/index.html"
-          echo "const unstableCount=data.filter(d=>d.result==='UNSTABLE').length;" >> "$SITE/index.html"
-          echo "const colors=results.map(r=>r==='PASS'?'#4CAF50':(r==='UNSTABLE'?'#FFC107':'#F44336'));" >> "$SITE/index.html"
-          echo "new Chart(document.getElementById('trendChart'),{type:'line',data:{labels:builds,datasets:[{label:'Build Results',data:results.map(r=>r==='PASS'?1:(r==='UNSTABLE'?0:-1)),borderColor:'#2196F3',tension:0.2,fill:false,pointBackgroundColor:colors,pointRadius:6}]},options:{scales:{y:{ticks:{callback:v=>v==1?'PASS':v==0?'UNSTABLE':'FAIL'},min:-1,max:1}}}});" >> "$SITE/index.html"
-          echo "});</script>" >> "$SITE/index.html"
-
-          echo "<h3>Latest Reports</h3><ul>" >> "$SITE/index.html"
-          for OS in ubuntu-latest windows-latest; do
-            mkdir -p "$SITE/latest/$OS"
-            cp -r artifacts/validation-report-$OS/* "$SITE/latest/$OS/" || true
-            echo "<li><a href='latest/$OS/validation_report.html'>Latest Report for $OS</a></li>" >> "$SITE/index.html"
-          done
-          echo "</ul><hr><p>Generated $(TZ='America/Los_Angeles' date)</p></body></html>" >> "$SITE/index.html"
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ${{ env.SITE_DIR }}
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-
-      - name: Workflow summary with badges
+      - name: Generate Allure Report
         if: always()
         run: |
-          PAGE_URL="${{ steps.deployment.outputs.page_url }}"
-          echo "### 💾 SSD Validation CI/CD Summary" >> $GITHUB_STEP_SUMMARY
-          echo "[![Ubuntu Report](https://img.shields.io/badge/Ubuntu-Latest-blue)](${PAGE_URL}/latest/ubuntu-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
-          echo "[![Windows Report](https://img.shields.io/badge/Windows-Latest-blue)](${PAGE_URL}/latest/windows-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
-          echo "[![All Builds](https://img.shields.io/badge/View-History-green)](${PAGE_URL}/)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Build #${{ github.run_number }} Result:** ${{ needs.test.outputs.test_outcome }}" >> $GITHUB_STEP_SUMMARY
+          allure generate $ALLURE_RESULTS --clean -o $ALLURE_REPORT || echo "ALLURE_GEN_FAILED=true" >> $GITHUB_ENV
+
+      - name: Upload Allure Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: ${{ env.ALLURE_REPORT }}
+
+      - name: Determine Build Status
+        id: build_status
+        run: |
+          echo "Evaluating build result..."
+          if [ "${{ env.TESTS_FAILED }}" = "true" ]; then
+            echo "BUILD_STATUS=UNSTABLE" >> $GITHUB_ENV
+            echo "⚠️ UNSTABLE - Environment okay but one or more tests failed."
+          elif [ "${{ env.ALLURE_GEN_FAILED }}" = "true" ]; then
+            echo "BUILD_STATUS=FAIL" >> $GITHUB_ENV
+            echo "❌ FAIL - Report generation or setup failure."
+          else
+            echo "BUILD_STATUS=PASS" >> $GITHUB_ENV
+            echo "✅ PASS - Everything succeeded."
+          fi
+
+      - name: Upload Build Summary
+        if: always()
+        run: |
+          echo "## 🧾 Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ env.BUILD_STATUS }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Save History Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: history-data
+          path: allure-results/history
+
+  publish-trend:
+    name: 📈 Update History Dashboard
+    needs: [ build-and-test ]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Download History Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: history-data
+          path: allure-results/history
+
+      - name: Merge History (Allure)
+        run: |
+          mkdir -p allure-results
+          echo "Merging historical data..."
+          if [ -d "allure-results/history" ]; then
+            cp -r allure-results/history allure-results/ || true
+          fi
+
+      - name: Publish Allure Report to GitHub Pages
+        if: always()
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: allure-report
+          publish_branch: gh-pages
