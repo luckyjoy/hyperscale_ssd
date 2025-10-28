@@ -42,7 +42,7 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
-          
+
       - name: Install dependencies
         shell: bash
         run: |
@@ -54,7 +54,7 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y jq
           fi
-
+          
       - name: Run Behave Tests
         id: run_behave_tests
         shell: bash
@@ -102,7 +102,7 @@ jobs:
             BROKEN_COUNT=0
           fi
 
-          # ✅ FIX: Use 'jq' to generate the JSON object to avoid multi-line parsing errors
+          # Use 'jq' to generate the JSON object 
           echo "{ \"statistic\": { \"passed\": ${PASSED_COUNT}, \"failed\": ${FAILED_COUNT}, \"broken\": ${BROKEN_COUNT} } }" | jq . > "$REPORT_DIR/summary.json"
           
           echo "Generated summary.json with Passed: ${PASSED_COUNT}, Failed: ${FAILED_COUNT}, Broken: ${BROKEN_COUNT}"
@@ -122,6 +122,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # 🆕 FIX: Install JQ for JSON processing in the report job, required to read summary.json
+      - name: Install JQ
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       # Fix: Dynamically find the workflow filename.
       - name: Get workflow filename
@@ -240,17 +244,17 @@ jobs:
           echo "</ul>" >> "$SITE_DIR/index.html"
 
           # Gather data for the chart (oldest to newest)
-          # Fix: Reads actual test statistics from summary.json
+          # Now reads actual test statistics from summary.json, which is guaranteed to exist and be valid JSON
           for BUILD in $CHART_BUILDS; do
             TOTAL_PASS=0
             TOTAL_FAIL=0   
             TOTAL_UNSTABLE=0 
             
             for OS in ubuntu-latest windows-latest; do
-              SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json" # Correct path to summary.json
+              SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json"
               
               if [ -f "$SUMMARY_FILE" ]; then
-                # Now reading 'passed', 'failed', and 'broken' (for UNSTABLE)
+                # Reading 'passed', 'failed', and 'broken' (for UNSTABLE)
                 PASS_COUNT=$(jq -r '.statistic.passed // 0' "$SUMMARY_FILE" 2>/dev/null)
                 FAIL_COUNT=$(jq -r '.statistic.failed // 0' "$SUMMARY_FILE" 2>/dev/null)
                 BROKEN_COUNT=$(jq -r '.statistic.broken // 0' "$SUMMARY_FILE" 2>/dev/null) 
