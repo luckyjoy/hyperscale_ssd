@@ -133,6 +133,69 @@ jobs:
         run: |
           SITE=${{ env.SITE_DIR }}
           mkdir -p "$SITE/latest"
+          HISTORY=${{ env.HISTORY_FILE }}
+
+          # Create header
+          {
+            echo "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+            echo "<title>SSD Validation Dashboard</title>"
+            echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
+            echo "<style>"
+            echo "body{font-family:Segoe UI,Arial;margin:40px;}"
+            echo "h2{border-bottom:1px solid #ccc;padding-bottom:4px;}"
+            echo "a{text-decoration:none;color:#1565C0;}"
+            echo ".legend{display:inline-block;margin-right:10px;padding:4px 8px;border-radius:4px;}"
+            echo ".pass{background:#4CAF50;color:white;}"
+            echo ".fail{background:#F44336;color:white;}"
+            echo ".unstable{background:#FFC107;color:black;}"
+            echo "canvas{max-width:800px;}"
+            echo "</style></head><body>"
+            echo "<h2>🌿 Latest Hyperscale SSD Framework Reports</h2>"
+            echo "<p><a href='latest/ubuntu-latest/validation_report.html'>Latest Report (ubuntu-latest)</a>"
+            echo " - Last run: $(TZ='America/Los_Angeles' date '+%a %b %d %T PDT %Y')</p>"
+            echo "<p><a href='latest/windows-latest/validation_report.html'>Latest Report (windows-latest)</a>"
+            echo " - Last run: $(TZ='America/Los_Angeles' date '+%a %b %d %T PDT %Y')</p>"
+            echo "<br><h2>📊 Report History & Trends (Times in PDT)</h2>"
+          } > "$SITE/index.html"
+
+          # Generate build list
+          echo "<ul>" >> "$SITE/index.html"
+          jq -r '.[] | "Build #\(.build) (Run: \(.time) PDT) – <a href=\"\(.url)\">Details</a> – <a href=\"latest/ubuntu-latest/validation_report.html\">Ubuntu</a> / <a href=\"latest/windows-latest/validation_report.html\">Windows</a>"' \
+            $HISTORY | tac | while read -r line; do
+              echo "<li>$line</li>" >> "$SITE/index.html"
+          done
+          echo "</ul><br>" >> "$SITE/index.html"
+
+          # Chart
+          echo "<div><span class='legend pass'>PASS</span><span class='legend fail'>FAIL</span><span class='legend unstable'>UNSTABLE</span></div>" >> "$SITE/index.html"
+          echo "<canvas id='trendChart'></canvas>" >> "$SITE/index.html"
+          echo "<script>" >> "$SITE/index.html"
+          echo "fetch('history.json').then(r=>r.json()).then(data=>{" >> "$SITE/index.html"
+          echo "data.sort((a,b)=>a.build-b.build);" >> "$SITE/index.html"
+          echo "const builds=data.map(d=>d.build);" >> "$SITE/index.html"
+          echo "const passCounts=data.map((d,i)=>data.slice(0,i+1).filter(x=>x.result==='PASS').length);" >> "$SITE/index.html"
+          echo "const failCounts=data.map((d,i)=>data.slice(0,i+1).filter(x=>x.result==='FAIL').length);" >> "$SITE/index.html"
+          echo "const unstableCounts=data.map((d,i)=>data.slice(0,i+1).filter(x=>x.result==='UNSTABLE').length);" >> "$SITE/index.html"
+          echo "new Chart(document.getElementById('trendChart'),{type:'line',data:{labels:builds,datasets:["
+          echo "{label:'PASS',data:passCounts,borderColor:'#4CAF50',backgroundColor:'#4CAF50',tension:0.1,fill:false},"
+          echo "{label:'FAIL',data:failCounts,borderColor:'#F44336',backgroundColor:'#F44336',tension:0.1,fill:false},"
+          echo "{label:'UNSTABLE',data:unstableCounts,borderColor:'#FFC107',backgroundColor:'#FFC107',tension:0.1,fill:false}"
+          echo "]},options:{plugins:{legend:{display:false}},scales:{x:{title:{display:true,text:'Build Number'}},y:{title:{display:true,text:'Total Number of Tests'}}}}});"
+          echo "});</script>" >> "$SITE/index.html"
+
+          echo "<p style='margin-top:40px;font-size:12px;color:#666;'>Generated automatically on $(TZ='America/Los_Angeles' date '+%a %b %d %T PDT %Y')</p>" >> "$SITE/index.html"
+          echo "</body></html>" >> "$SITE/index.html"
+
+          # Copy reports to latest/
+          for OS in ubuntu-latest windows-latest; do
+            mkdir -p "$SITE/latest/$OS"
+            cp -r artifacts/validation-report-$OS/* "$SITE/latest/$OS/" || true
+          done
+
+
+        run: |
+          SITE=${{ env.SITE_DIR }}
+          mkdir -p "$SITE/latest"
 
           echo "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>SSD Validation Dashboard</title>" > "$SITE/index.html"
           echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>" >> "$SITE/index.html"
