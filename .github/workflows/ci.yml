@@ -66,13 +66,11 @@ jobs:
           REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
           mkdir -p "$REPORT_DIR"
 
-          # Run Behave
           behave --tags=@all --exclude "features/manual_tests" \
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_DIR/validation_report.html" --no-capture | tee /tmp/behave_output.txt
           TEST_EXIT_CODE=$?
 
-          # Determine result
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             if grep -q "failed" /tmp/behave_output.txt; then
               RESULT=UNSTABLE
@@ -82,18 +80,17 @@ jobs:
           else
             RESULT=PASS
           fi
+
           echo "Detected result: $RESULT"
           echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
           echo "$RESULT" > "$REPORT_DIR/status.txt"
           echo "$(TZ='America/Los_Angeles' date)" > "$REPORT_DIR/timestamp.txt"
 
-          # Extract scenario counts
           SUMMARY_LINE=$(grep 'scenarios\.' /tmp/behave_output.txt | tail -n 1)
           PASSED_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*([0-9]+) scenarios passed.*/\1/' 2>/dev/null | grep -o '^[0-9]\+$' || echo 0)
           FAILED_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*, ([0-9]+) failed.*/\1/' 2>/dev/null | grep -o '^[0-9]\+$' || echo 0)
           BROKEN_COUNT=$([ "$RESULT" = "UNSTABLE" ] && echo 1 || echo 0)
 
-          # Create summary.json
           echo "{ \"statistic\": { \"passed\": ${PASSED_COUNT}, \"failed\": ${FAILED_COUNT}, \"broken\": ${BROKEN_COUNT} } }" | jq . > "$REPORT_DIR/summary.json"
           echo "Generated summary.json with Passed: ${PASSED_COUNT}, Failed: ${FAILED_COUNT}, Broken: ${BROKEN_COUNT}"
 
@@ -127,12 +124,11 @@ jobs:
           path: previous-site
           if_no_artifact_found: ignore
 
-      - name: Restore History
+      - name: Restore full history
         run: |
           mkdir -p "${{ env.SITE_DIR }}"
           if [ -d "previous-site" ]; then
             echo "♻️ Restoring previous site history..."
-            # merge previous builds including summary.json and index.html
             rsync -a previous-site/ "${{ env.SITE_DIR }}/"
           fi
 
@@ -156,17 +152,17 @@ jobs:
             # Copy new test artifacts
             cp -R reports/build-$OS/* "$REPORT_DIR_BUILD/" || true
 
-            # Copy validation_report.html as index.html
+            # Copy validation_report.html as index.html for GitHub Pages
             if [ -f "$REPORT_DIR_BUILD/validation_report.html" ]; then
               cp "$REPORT_DIR_BUILD/validation_report.html" "$REPORT_DIR_LATEST/index.html"
             fi
 
-            # Copy summary.json to latest folder for chart
+            # Copy summary.json for trend chart
             if [ -f "$REPORT_DIR_BUILD/summary.json" ]; then
               cp "$REPORT_DIR_BUILD/summary.json" "$REPORT_DIR_LATEST/summary.json"
             fi
 
-            # Copy all other files
+            # Ensure all files are copied to latest folder
             cp -R "$REPORT_DIR_BUILD/"* "$REPORT_DIR_LATEST/" || true
 
             REPO_NAME="${GITHUB_REPOSITORY##*/}"
@@ -252,7 +248,7 @@ jobs:
               maintainAspectRatio: false,
               plugins: { legend: { position: 'top' } },
               scales: {
-                y: { beginAtZero: true, stepSize: 1, min: 0, suggestedMax: 10, title: { display: true, text: 'Total Number of Tests' } },
+                y: { beginAtZero: true, stepSize: 1, min: 0, title: { display: true, text: 'Total Number of Tests' } },
                 x: { title: { display: true, text: 'Build Number' } }
               }
             }
