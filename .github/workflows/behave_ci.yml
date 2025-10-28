@@ -42,9 +42,11 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
-
+          
       - name: Install dependencies
+        shell: bash
         run: |
+          set +e
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           # Ensure 'jq' is installed for robust JSON generation on Linux
