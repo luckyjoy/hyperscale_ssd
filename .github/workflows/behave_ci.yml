@@ -1,0 +1,238 @@
+name: Hyperscale SSD Framework CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  SITE_DIR: site
+
+jobs:
+  test:
+    name: Run Behave Tests on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    outputs:
+      test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install behave-html-pretty-formatter
+
+      - name: Run Behave Tests
+        id: run_behave_tests
+        shell: bash
+        run: |
+          set +e
+          OS_NAME=${{ matrix.os }}
+          BUILD_NUMBER=${{ github.run_number }}
+          REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
+          REPORT_PATH="$REPORT_DIR/validation_report.html"
+          STATS_FILE="$REPORT_DIR/stats.txt"
+
+          mkdir -p "$REPORT_DIR"
+          behave --tags=@adv --exclude "features/manual_tests" \
+            --format behave_html_pretty_formatter:PrettyHTMLFormatter \
+            -o "$REPORT_PATH" --no-capture | tee /tmp/behave_output.txt
+          TEST_EXIT_CODE=$?
+
+          grep 'Features:' /tmp/behave_output.txt | sed 's/Features: //' > "$STATS_FILE"
+
+          if [ $TEST_EXIT_CODE -ne 0 ]; then
+            if grep -q "failed" /tmp/behave_output.txt; then
+                RESULT=UNSTABLE
+            else
+                RESULT=FAIL
+            fi
+          else
+            RESULT=PASS
+          fi
+          echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
+          exit 0
+
+      - name: Create Timestamp
+        run: echo "$(date -u)" > timestamp.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: timestamp-${{ matrix.os }}
+          path: timestamp.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validation-report-${{ matrix.os }}
+          path: reports/${{ github.run_number }}/${{ matrix.os }}
+
+  deploy:
+    name: Publish Reports & Trends
+    needs: [test]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Rebuild index.html with Trend Charts
+        shell: bash
+        run: |
+          SITE_DIR="${{ env.SITE_DIR }}"
+          mkdir -p "$SITE_DIR"
+
+          CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
+          BUILD_NUMBER=${{ github.run_number }}
+
+          # Move reports into site structure
+          mkdir -p "$SITE_DIR/$BUILD_NUMBER"
+          for OS in ubuntu-latest windows-latest; do
+            SRC_DIR="artifacts/validation-report-${OS}/reports/${BUILD_NUMBER}/${OS}"
+            DST_DIR="$SITE_DIR/$BUILD_NUMBER/$OS"
+            if [ -d "$SRC_DIR" ]; then
+              mkdir -p "$(dirname "$DST_DIR")"
+              mv "$SRC_DIR" "$DST_DIR"
+            fi
+          done
+
+          # Build latest symlink
+          mkdir -p "$SITE_DIR/latest"
+          for OS in ubuntu-latest windows-latest; do
+            if [ -d "$SITE_DIR/$BUILD_NUMBER/$OS" ]; then
+              rm -rf "$SITE_DIR/latest/$OS"
+              cp -r "$SITE_DIR/$BUILD_NUMBER/$OS" "$SITE_DIR/latest/$OS"
+              echo "$(date -u)" > "$SITE_DIR/latest/$OS/build-info.txt"
+            fi
+          done
+
+          # Generate index.html
+          echo "<html><head><title>Hyperscale SSD Framework Reports</title>
+          <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+          <style>
+          body{font-family:sans-serif;margin:20px;}
+          ul{list-style:none;padding:0;}
+          li{margin:6px 0;}
+          a{text-decoration:none;color:#0366d6;}
+          a:hover{text-decoration:underline;}
+          #chart-container{max-width:700px;max-height:350px;margin-top:30px;}
+          </style></head><body>
+          <h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>
+          <h2>🧩 Latest Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
+
+          for OS in ubuntu-latest windows-latest; do
+            if [ -d "$SITE_DIR/latest/$OS" ]; then
+              TS=$(cat "$SITE_DIR/latest/$OS/build-info.txt" 2>/dev/null || echo "")
+              TS_PDT=$(TZ='America/Los_Angeles' date -d "$TS" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "$TS")
+              echo "<li><a href='latest/$OS/validation_report.html'>Latest Report ($OS)</a> - Last run: $TS_PDT</li>" >> "$SITE_DIR/index.html"
+            else
+              echo "<li><strong>$OS:</strong> (No report found)</li>" >> "$SITE_DIR/index.html"
+            fi
+          done
+
+          echo "</ul><hr><h2>📜 Build History</h2><ul>" >> "$SITE_DIR/index.html"
+
+          BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr)
+          CHART_BUILDS=$(echo "$BUILDS" | sort -n)
+          LABELS=""
+          PASS_RATIOS=""
+          FAIL_RATIOS=""
+          UNSTABLE_RATIOS=""
+
+          for BUILD in $BUILDS; do
+            TS=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "N/A")
+            TS_PDT=$(TZ='America/Los_Angeles' date -d "$TS" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
+            echo "<li><strong>Build #$BUILD</strong> ($TS_PDT) - <a href='$BUILD/ubuntu-latest/validation_report.html'>Ubuntu</a> / <a href='$BUILD/windows-latest/validation_report.html'>Windows</a></li>" >> "$SITE_DIR/index.html"
+          done
+          echo "</ul><hr><h2>📊 PASS/FAIL/UNSTABLE Ratios (PDT)</h2>" >> "$SITE_DIR/index.html"
+
+          # Collect stats from Behave output
+          for BUILD in $CHART_BUILDS; do
+            TOTAL_PASS=0
+            TOTAL_FAIL=0
+            TOTAL_UNSTABLE=0
+            TOTAL_ALL=0
+            for OS in ubuntu-latest windows-latest; do
+              STATS_FILE="$SITE_DIR/$BUILD/$OS/stats.txt"
+              if [ -f "$STATS_FILE" ]; then
+                STATS=$(cat "$STATS_FILE")
+                TOTAL=$(echo "$STATS" | awk '{print $1}')
+                PASSED=$(echo "$STATS" | awk '{print $2}')
+                FAILED=$(echo "$STATS" | awk '{print $3}')
+                TOTAL_PASS=$((TOTAL_PASS + PASSED))
+                TOTAL_FAIL=$((TOTAL_FAIL + FAILED))
+                TOTAL_ALL=$((TOTAL_ALL + TOTAL))
+              fi
+            done
+            if [ $TOTAL_ALL -gt 0 ]; then
+              PASS_RATIO=$((100 * TOTAL_PASS / TOTAL_ALL))
+              FAIL_RATIO=$((100 * TOTAL_FAIL / TOTAL_ALL))
+              UNSTABLE_RATIO=$((100 - PASS_RATIO - FAIL_RATIO))
+            else
+              PASS_RATIO=0; FAIL_RATIO=0; UNSTABLE_RATIO=0
+            fi
+            LABELS="$LABELS'$BUILD',"
+            PASS_RATIOS="$PASS_RATIOS$PASS_RATIO,"
+            FAIL_RATIOS="$FAIL_RATIOS$FAIL_RATIO,"
+            UNSTABLE_RATIOS="$UNSTABLE_RATIOS$UNSTABLE_RATIO,"
+          done
+
+          echo "<div id='chart-container'><canvas id='trendChart'></canvas></div>
+          <script>
+          const ctx=document.getElementById('trendChart').getContext('2d');
+          new Chart(ctx,{
+            type:'line',
+            data:{
+              labels:[${LABELS%,}],
+              datasets:[
+                {label:'PASS %',data:[${PASS_RATIOS%,}],borderColor:'green',fill:false},
+                {label:'FAIL %',data:[${FAIL_RATIOS%,}],borderColor:'red',fill:false},
+                {label:'UNSTABLE %',data:[${UNSTABLE_RATIOS%,}],borderColor:'orange',fill:false}
+              ]
+            },
+            options:{
+              responsive:true,
+              plugins:{legend:{position:'top'}},
+              scales:{
+                y:{beginAtZero:true,max:100,title:{display:true,text:'Percentage (%)'}},
+                x:{title:{display:true,text:'Build Number'}}
+              }
+            }
+          });
+          </script>
+          <hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ env.SITE_DIR }}
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Workflow summary with badges
+        if: always()
+        run: |
+          PAGE_URL="${{ steps.deployment.outputs.page_url }}"
+          echo "### 💾 Hyperscale SSD Framework CI/CD Summary" >> $GITHUB_STEP_SUMMARY
+          echo "[![Ubuntu Report](https://img.shields.io/badge/Ubuntu-Latest-blue)](${PAGE_URL}/latest/ubuntu-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Windows Report](https://img.shields.io/badge/Windows-Latest-blue)](${PAGE_URL}/latest/windows-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![History](https://img.shields.io/badge/View-History-green)](${PAGE_URL}/)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Build #${{ github.run_number }} Result:** ${{ needs.test.outputs.test_outcome }}" >> $GITHUB_STEP_SUMMARY
