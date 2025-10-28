@@ -103,202 +103,65 @@ jobs:
           retention-days: 7
 
 ---
-  # Job 2: Generates Dashboard and Deploys (THIS IS THE MISSING JOB)
+  # Job 2: Generates Dashboard and Deploys
   report:
     name: Generate History Dashboard & Deploy
     runs-on: ubuntu-latest
     needs: test 
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get workflow filename
-        id: get_workflow_name
-        run: echo "WORKFLOW_FILE=$(basename .github/workflows/*.yml)" >> $GITHUB_ENV
-
-      - name: Download previous History Artifact
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          workflow: ${{ env.WORKFLOW_FILE }}
-          branch: main
-          name: history-dashboard
-          path: previous-site
-          if_no_artifact_found: ignore
-
-      - name: Restore Previous History
-        shell: bash
-        run: |
-          SITE_DIR="${{ env.SITE_DIR }}"
-          BUILD_NUMBER=${{ github.run_number }}
-          mkdir -p "$SITE_DIR"
-          
-          if [ -d "previous-site" ]; then
-            cp -r previous-site/* "$SITE_DIR/" || true
-            rm -rf "$SITE_DIR/latest" 2>/dev/null || true
-          fi
-          
-          mkdir -p "$SITE_DIR/$BUILD_NUMBER"
-
-      - name: Download Current Test Reports and Timestamps
+      # 👇 Restore previous history, collect artifacts, generate dashboard
+      - name: Download All Artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Organize Reports and Extract Metadata
+      - name: Build History Dashboard
         shell: bash
         run: |
-          SITE_DIR="${{ env.SITE_DIR }}"
-          BUILD_NUMBER=${{ github.run_number }}
-          CURRENT_BUILD_DIR="$SITE_DIR/$BUILD_NUMBER"
-
+          mkdir -p site
+          echo "<html><head><title>SSD Hyperscale Automation Framework</title></head><body>" > site/index.html
+          echo "<h1>💾 SSD Hyperscale Automation Framework Build History</h1>" >> site/index.html
+          echo "<p><strong>Author:</strong> Bang Thien Nguyen</p>" >> site/index.html
+          echo "<hr><ul>" >> site/index.html
           for OS in ubuntu-latest windows-latest; do
-            OS_DIR="$CURRENT_BUILD_DIR/$OS"
-            REPORT_ARTIFACT_NAME="validation-report-$OS"
-            TIMESTAMP_ARTIFACT_NAME="timestamp-$OS"
-            
-            mkdir -p "$OS_DIR"
-            if [ -d "artifacts/$REPORT_ARTIFACT_NAME" ]; then
-                cp -r artifacts/$REPORT_ARTIFACT_NAME/* "$OS_DIR"
-            fi
-            
-            TIMESTAMP=$(cat "artifacts/$TIMESTAMP_ARTIFACT_NAME/timestamp.txt" 2>/dev/null || echo "$(date -u)")
-            echo "$TIMESTAMP" > "$OS_DIR/build-info.txt"
+            mkdir -p site/latest/$OS
+            cp -r artifacts/validation-report-$OS/* site/latest/$OS/ || true
+            echo "<li><a href='latest/$OS/validation_report.html'>Latest report for $OS</a></li>" >> site/index.html
           done
-
-      - name: Generate Index.html History Dashboard
-        shell: bash
-        run: |
-          SITE_DIR="${{ env.SITE_DIR }}"
-          CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
-          BUILD_NUMBER=${{ github.run_number }}
-          mkdir -p "$SITE_DIR/latest"
-
-          # HTML structure start
-          echo "<html><head><title>SSD Validation Build History</title>
-          <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
-          <style>
-          body{font-family:sans-serif;margin:20px;}
-          ul{list-style:none;padding:0;}
-          li{margin:6px 0;}
-          a{text-decoration:none;color:#0366d6;}
-          a:hover{text-decoration:underline;}
-          #chart-container { max-width: 800px; max-height: 400px; margin: 0; }
-          </style></head><body>
-          <h1>💾 SSD Hyperscale Automation Framework Build History</h1>
-          <h2>🧩 Latest Validation Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
-          
-          # Create 'latest' links
-          for OS in ubuntu-latest windows-latest; do
-              LATEST_DIR="$SITE_DIR/latest/$OS"
-              CURRENT_DIR="$SITE_DIR/$BUILD_NUMBER/$OS"
-              mkdir -p "$LATEST_DIR"
-              cp -r "$CURRENT_DIR"/* "$LATEST_DIR/" || true
-              
-              TS_UTC=$(cat "$LATEST_DIR/build-info.txt" 2>/dev/null || echo "")
-              TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "$TS_UTC")
-              echo "<li><strong><a href='latest/$OS/validation_report.html'>Latest Report ($OS)</a></strong> - Last run: $TS_DISPLAY</li>" >> "$SITE_DIR/index.html"
-          done
-
-          echo "</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2><ul>" >> "$SITE_DIR/index.html"
-          
-          # Gather and display build history links
-          BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr)
-          CHART_BUILDS=$(echo "$BUILDS" | sort -n)
-          LABELS=""
-          PASS_COUNTS=""
-          FAIL_COUNTS=""
-          
-          for BUILD in $BUILDS; do
-            TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "")
-            TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
-            echo "<li><strong>Build #${BUILD}</strong> (Run: $TS_DISPLAY) - <a href='${BUILD}/ubuntu-latest/validation_report.html'>Ubuntu</a> / <a href='${BUILD}/windows-latest/validation_report.html'>Windows</a></li>" >> "$SITE_DIR/index.html"
-          done
-          echo "</ul>" >> "$SITE_DIR/index.html"
-          
-          # Gather chart data
-          for BUILD in $CHART_BUILDS; do
-            TOTAL_PASS=0
-            TOTAL_FAIL=0
-            
-            for OS in ubuntu-latest windows-latest; do
-              STATS_FILE="$SITE_DIR/$BUILD/$OS/stats.txt"
-              if [ -f "$STATS_FILE" ]; then
-                PASS_COUNT=$(grep -oE '[0-9]+ passed' "$STATS_FILE" | awk '{print $1}')
-                FAIL_COUNT=$(grep -oE '[0-9]+ failed' "$STATS_FILE" | awk '{print $1}')
-                
-                TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
-                TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
-              fi
-            done
-            
-            LABELS="$LABELS'$BUILD',"
-            PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
-            FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
-          done
-          
-          # Chart.js Integration
-          echo "<div id='chart-container'>
-          <canvas id='trendChart'></canvas>
-          </div>
-          <script>
-          const ctx = document.getElementById('trendChart').getContext('2d');
-          new Chart(ctx, {
-            type: 'line',
-            data: {
-              labels: [${LABELS%,}],
-              datasets: [
-                {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', backgroundColor: 'rgba(0, 128, 0, 0.2)', fill: false},
-                {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', backgroundColor: 'rgba(255, 0, 0, 0.2)', fill: false}
-              ]
-            },
-            options: {
-              responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } },
-              scales: { y: { beginAtZero: true, title: { display: true, text: 'Total Passed Features/Scenarios' } },
-                        x: { title: { display: true, text: 'Build Number' } } }
-            }
-          });
-          </script>
-          <hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
+          echo "</ul><hr><p>Generated: $(TZ='America/Los_Angeles' date)</p></body></html>" >> site/index.html
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ${{ env.SITE_DIR }}
+          path: site
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Upload History Dashboard Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: history-dashboard
-          path: ${{ env.SITE_DIR }}
-          retention-days: 7
-
+      # ✅ FIX: Add clear workflow summary with badges
       - name: Add Workflow Summary (Badges)
+        if: always()
         run: |
-          # THIS STEP POSTS THE BADGES!
-          PAGE_URL=${{ steps.deployment.outputs.page_url }}
+          PAGE_URL="${{ steps.deployment.outputs.page_url }}"
+          TEST_RESULT="${{ needs.test.outputs.test_outcome }}"
           BASE_URL="${PAGE_URL%/}"
-          TEST_STATUS=${{ needs.test.outputs.test_outcome }}
 
-          if [[ "$TEST_STATUS" == "FAIL" ]]; then
-            STATUS_ICON="❌"
-            STATUS_TEXT="Failed (setup/config error)"
-          elif [[ "$TEST_STATUS" == "UNSTABLE" ]]; then
-            STATUS_ICON="⚠️"
-            STATUS_TEXT="Unstable (some tests failed)"
-          else
-            STATUS_ICON="✅"
-            STATUS_TEXT="All tests passed"
-          fi
-
-          echo "### 💾 SSD Validation CI/CD" >> $GITHUB_STEP_SUMMARY
+          echo "### 💾 SSD Validation CI/CD Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[![Ubuntu Latest Report](https://img.shields.io/badge/Ubuntu-Latest_Build-blue)](${BASE_URL}/latest/ubuntu-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
-          echo "[![Windows Latest Report](https://img.shields.io/badge/Windows-Latest_Build-blue)](${BASE_URL}/latest/windows-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
-          echo "[![Report History](https://img.shields.io/badge/All-Builds-green)](${BASE_URL}/)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Ubuntu Report](https://img.shields.io/badge/Ubuntu-Latest_Report-blue)](${BASE_URL}/latest/ubuntu-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Windows Report](https://img.shields.io/badge/Windows-Latest_Report-blue)](${BASE_URL}/latest/windows-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![All Builds](https://img.shields.io/badge/View-History-green)](${BASE_URL}/)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Build #${{ github.run_number }} | Status: $STATUS_ICON $STATUS_TEXT" >> $GITHUB_STEP_SUMMARY
+          echo "**Build #${{ github.run_number }} – Result:** ${TEST_RESULT}" >> $GITHUB_STEP_SUMMARY
