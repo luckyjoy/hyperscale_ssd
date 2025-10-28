@@ -134,94 +134,114 @@ jobs:
         run: |
           mkdir -p history
           HISTORY_JSON="history/history.json"
-          BUILD_DIR="latest"
 
-          # Get current time in PDT
+          # Current metadata
+          BUILD="${{ github.run_number }}"
+          OS="${{ matrix.os }}"
+          STATUS="${{ steps.run_behave_tests.outputs.test_outcome }}"
           TIMESTAMP=$(TZ='America/Los_Angeles' date +"%Y-%m-%d %H:%M:%S PDT")
 
-          # Determine status
-          STATUS="${{ job.status }}"
-          if [[ "$STATUS" == "success" ]]; then
-            RESULT="PASS"
-          elif [[ "$STATUS" == "failure" ]]; then
-            RESULT="FAIL"
-          else
-            RESULT="UNSTABLE"
+          UBUNTU_LINK="latest/ubuntu-latest/validation_report.html"
+          WINDOWS_LINK="latest/windows-latest/validation_report.html"
+
+          # Create history.json if missing
+          if [ ! -f "$HISTORY_JSON" ]; then
+            echo "[]" > "$HISTORY_JSON"
           fi
 
-          # Create new entry
+          # Build entry for this OS
           ENTRY=$(jq -n \
-            --arg build "${{ github.run_number }}" \
+            --arg build "$BUILD" \
+            --arg os "$OS" \
+            --arg status "$STATUS" \
             --arg timestamp "$TIMESTAMP" \
-            --arg status "$RESULT" \
-            --arg ul "latest/ubuntu-latest/validation_report.html" \
-            --arg wl "latest/windows-latest/validation_report.html" \
-            '{build: ($build|tonumber), timestamp: $timestamp, status: $status, ubuntu_link: $ul, windows_link: $wl}')
+            --arg ul "$UBUNTU_LINK" \
+            --arg wl "$WINDOWS_LINK" \
+            '{build: ($build|tonumber), timestamp: $timestamp, results: {($os): $status}, links: {ubuntu: $ul, windows: $wl}}')
 
-          # Merge safely with existing history (if any)
-          if [ -f "$HISTORY_JSON" ] && [ -s "$HISTORY_JSON" ]; then
-            jq ". + [$ENTRY] | unique_by(.build) | sort_by(.build)" "$HISTORY_JSON" > history.tmp
-          else
-            echo "[]" > history.tmp
-            jq ". + [$ENTRY]" history.tmp > history.tmp2 && mv history.tmp2 history.tmp
-          fi
+          # Merge logic:
+          # - If build exists, update only the corresponding OS result.
+          # - Otherwise, append a new entry.
+          jq --argjson new "$ENTRY" '
+            (map(select(.build == $new.build)) | length) as $exists |
+            if $exists == 0 then
+              . + [$new]
+            else
+              map(if .build == $new.build then
+                    .results += $new.results |
+                    .links = $new.links |
+                    .timestamp = $new.timestamp
+                  else . end)
+            end
+          ' "$HISTORY_JSON" > history.tmp && mv history.tmp "$HISTORY_JSON"
 
-          mv history.tmp "$HISTORY_JSON"
-
-          # Generate HTML summary
+          # Generate HTML dashboard
           python3 <<'EOF'
-          import json, os
+          import json
           from pathlib import Path
 
           path = Path("history/history.json")
-          if not path.exists() or path.stat().st_size == 0:
-              data = []
-          else:
-              with open(path) as f:
-                  data = json.load(f)
-
-          if not data:
-              print("⚠️ No builds found, creating placeholder HTML...")
-              Path("history.html").write_text("<html><body><h1>No builds yet</h1></body></html>")
+          if not path.exists():
               exit(0)
 
-          data.sort(key=lambda x: x["build"], reverse=True)
-          latest = data[0]
+          with open(path) as f:
+              data = json.load(f)
 
-          html = f"""
-          <html>
+          # Sort by build descending
+          data.sort(key=lambda x: x["build"], reverse=True)
+
+          # Count per status
+          counts = {"PASS": 0, "FAIL": 0, "UNSTABLE": 0}
+          for entry in data:
+              for status in entry.get("results", {}).values():
+                  if status in counts:
+                      counts[status] += 1
+
+          html = """<html>
           <head>
-            <meta charset="UTF-8">
+            <meta charset='UTF-8'>
             <title>Hyperscale SSD Framework CI/CD History</title>
-            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+            <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
             <style>
-              body {{ font-family: Arial, sans-serif; margin: 30px; background: #f5f7fa; }}
-              h1, h2 {{ color: #333; }}
-              table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
-              th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
-              .pass {{ color: green; }}
-              .fail {{ color: red; }}
-              .unstable {{ color: orange; }}
+              body { font-family: Arial, sans-serif; margin: 40px; background: #f7f9fc; }
+              h1, h2 { color: #333; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+              th, td { padding: 8px; border-bottom: 1px solid #ddd; }
+              .pass { color: green; }
+              .fail { color: red; }
+              .unstable { color: orange; }
             </style>
           </head>
           <body>
             <h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>
             <h2>🧩 Latest Reports</h2>
-            <ul>
-              <li>Ubuntu: <a href="{latest['ubuntu_link']}">{latest['ubuntu_link']}</a></li>
-              <li>Windows: <a href="{latest['windows_link']}">{latest['windows_link']}</a></li>
-            </ul>
-
-            <h2>📜 Build History</h2>
-            <table>
-              <tr><th>Build</th><th>Timestamp (PDT)</th><th>Status</th></tr>
           """
 
-          counts = {"PASS": 0, "FAIL": 0, "UNSTABLE": 0}
+          # Show links to latest build reports
+          latest = data[0]
+          html += f"""
+            <ul>
+              <li>Ubuntu: <a href="{latest['links']['ubuntu']}">{latest['links']['ubuntu']}</a></li>
+              <li>Windows: <a href="{latest['links']['windows']}">{latest['links']['windows']}</a></li>
+            </ul>
+            <h2>📜 Build History</h2>
+            <table>
+              <tr><th>Build</th><th>Timestamp (PDT)</th><th>Ubuntu</th><th>Windows</th></tr>
+          """
+
           for entry in data:
-              counts[entry["status"]] = counts.get(entry["status"], 0) + 1
-              cls = entry["status"].lower()
-              html += f'<tr><td><a href="{entry["ubuntu_link"]}">#{entry["build"]}</a></td><td>{entry["timestamp"]}</td><td class="{cls}">{entry["status"]}</td></tr>'
+              ubuntu_status = entry["results"].get("ubuntu-latest", "N/A")
+              windows_status = entry["results"].get("windows-latest", "N/A")
+              cls_u = ubuntu_status.lower()
+              cls_w = windows_status.lower()
+              html += (
+                  f"<tr>"
+                  f"<td><a href='{entry['links']['ubuntu']}'>#{entry['build']}</a></td>"
+                  f"<td>{entry['timestamp']}</td>"
+                  f"<td class='{cls_u}'>{ubuntu_status}</td>"
+                  f"<td class='{cls_w}'>{windows_status}</td>"
+                  f"</tr>"
+              )
 
           html += f"""
             </table>
@@ -240,9 +260,7 @@ jobs:
                   }}]
                 }},
                 options: {{
-                  scales: {{
-                    y: {{ beginAtZero: true }}
-                  }}
+                  scales: {{ y: {{ beginAtZero: true }} }}
                 }}
               }});
             </script>
@@ -252,7 +270,7 @@ jobs:
           Path("history.html").write_text(html)
           EOF
 
-          cp history.html "$HISTORY_JSON" ${{ env.SITE_DIR }}/
+          cp history.html history/history.json ${{ env.SITE_DIR }}/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
