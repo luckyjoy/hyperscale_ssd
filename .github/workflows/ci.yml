@@ -147,11 +147,16 @@ jobs:
             REPORT_DIR_BUILD="$SITE_DIR/$BUILD_NUMBER/$OS"
             REPORT_DIR_LATEST="$SITE_DIR/latest/$OS"
             mkdir -p "$REPORT_DIR_BUILD" "$REPORT_DIR_LATEST"
+
             cp -R reports/build-$OS/* "$REPORT_DIR_BUILD/" || true
-            cp -R "$REPORT_DIR_BUILD/"* "$REPORT_DIR_LATEST/" || true
-            if [ ! -f "$REPORT_DIR_LATEST/index.html" ]; then
-              cp "$REPORT_DIR_BUILD/index.html" "$REPORT_DIR_LATEST/index.html"
+
+            # Copy validation_report.html as index.html for GitHub Pages
+            if [ -f "$REPORT_DIR_BUILD/validation_report.html" ]; then
+              cp "$REPORT_DIR_BUILD/validation_report.html" "$REPORT_DIR_LATEST/index.html"
             fi
+
+            # Copy all other files to latest folder
+            cp -R "$REPORT_DIR_BUILD/"* "$REPORT_DIR_LATEST/" || true
 
             REPO_NAME="${GITHUB_REPOSITORY##*/}"
             echo "{\"name\":\"$OS\",\"type\":\"GitHub Actions\",\"url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\",\"reportUrl\":\"https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/latest/$OS/\",\"buildOrder\":\"${BUILD_NUMBER}\",\"buildName\":\"Build ${BUILD_NUMBER} ($OS)\",\"buildUrl\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" > "$REPORT_DIR_LATEST/executor.json"
