@@ -84,7 +84,7 @@ jobs:
           echo "$RESULT" > "$REPORT_DIR/status.txt"
           echo "$(TZ='America/Los_Angeles' date)" > "$REPORT_DIR/timestamp.txt"
           
-          # --- FIX: Generate summary.json for trend chart ---
+          # --- FIX: Generate summary.json for trend chart statistics ---
           STATS_LINE=$(grep 'scenarios\.' /tmp/behave_output.txt | tail -n 1)
 
           PASSED_SCENARIOS=$(echo "$STATS_LINE" | grep -o '[0-9]\+ passed' | awk '{print $1}')
@@ -120,7 +120,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 🆕 FIX: Install JQ for JSON processing in the report job
+      # FIX: Install JQ for JSON processing in the report job
       - name: Install JQ
         run: sudo apt-get update && sudo apt-get install -y jq
 
@@ -241,14 +241,13 @@ jobs:
           echo "</ul>" >> "$SITE_DIR/index.html"
 
           # Gather data for the chart (oldest to newest)
-          # Fix: Reads actual test statistics from summary.json
           for BUILD in $CHART_BUILDS; do
             TOTAL_PASS=0
             TOTAL_FAIL=0   
             TOTAL_UNSTABLE=0 
             
             for OS in ubuntu-latest windows-latest; do
-              # ✅ FIX: Correct path to summary.json (Removed /widgets/)
+              # FIX: Correct path to summary.json (Removed /widgets/)
               SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json"
               
               if [ -f "$SUMMARY_FILE" ]; then
