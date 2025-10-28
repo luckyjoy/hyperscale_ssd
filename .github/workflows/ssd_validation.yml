@@ -82,10 +82,11 @@ jobs:
           date -u > "$REPORT_DIR/build-info.txt"
 
       # Upload a single artifact containing the report, stats, and timestamp for the dashboard
+      # ARTIFACT NAME MODIFIED: Now unique per OS to prevent 409 Conflict
       - name: Upload Current Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: current-build-reports
+          name: current-build-reports-${{ matrix.os }}
           path: current-reports/
           retention-days: 7
 
@@ -106,12 +107,19 @@ jobs:
           name: site
           path: ${{ env.SITE_DIR }}
           
-      # 2. Download current build artifacts
-      - name: Download Current Build Reports
+      # 2. Download current build artifacts (now split by OS)
+      - name: Download Ubuntu Reports
         uses: actions/download-artifact@v4
         with:
-          name: current-build-reports
-          path: current-reports/
+          name: current-build-reports-ubuntu-latest
+          path: current-reports/ubuntu-latest/
+
+      - name: Download Windows Reports
+        uses: actions/download-artifact@v4
+        with:
+          name: current-build-reports-windows-latest
+          path: current-reports/windows-latest/
+
 
       - name: Organize Reports and Rebuild Site Structure
         shell: bash
@@ -124,10 +132,10 @@ jobs:
           mkdir -p "$SITE_DIR"
           
           # --- Process and integrate current build reports ---
-          # Since the upload/download process is consistent, we trust the files are in current-reports/
-          
+          # Iterating through OSes, now looking in their dedicated download folders
           for OS in ubuntu-latest windows-latest; do
-            # Define target directories
+            # Source directory is now specific to the OS download
+            SOURCE_DIR="current-reports/$OS"
             TARGET_DIR="$SITE_DIR/$CURRENT_BUILD/$OS"
             LATEST_DIR="$SITE_DIR/latest/$OS"
             
@@ -135,20 +143,18 @@ jobs:
             mkdir -p "$TARGET_DIR"
             mkdir -p "$LATEST_DIR"
 
-            # Check if current build files exist. Since the 'test' job uploads the same files 
-            # for both OSes (as the output is overwritten), we check for the files once and copy 
-            # them into the structure for both OSes.
-            if [ -f "current-reports/stats.txt" ]; then
+            # Check if files exist in the dedicated OS folder
+            if [ -f "$SOURCE_DIR/stats.txt" ]; then
                 
                 # Copy to Historical Folder
-                cp current-reports/${REPORT_NAME} "$TARGET_DIR/" || true
-                cp current-reports/stats.txt "$TARGET_DIR/" || true
-                cp current-reports/build-info.txt "$TARGET_DIR/" || true
+                cp "$SOURCE_DIR/${REPORT_NAME}" "$TARGET_DIR/" || true
+                cp "$SOURCE_DIR/stats.txt" "$TARGET_DIR/" || true
+                cp "$SOURCE_DIR/build-info.txt" "$TARGET_DIR/" || true
 
                 # Copy to Latest Pointer Folder
-                cp current-reports/${REPORT_NAME} "$LATEST_DIR/" || true
-                cp current-reports/stats.txt "$LATEST_DIR/" || true
-                cp current-reports/build-info.txt "$LATEST_DIR/" || true
+                cp "$SOURCE_DIR/${REPORT_NAME}" "$LATEST_DIR/" || true
+                cp "$SOURCE_DIR/stats.txt" "$LATEST_DIR/" || true
+                cp "$SOURCE_DIR/build-info.txt" "$LATEST_DIR/" || true
             fi
           done
 
@@ -200,6 +206,7 @@ jobs:
             TOTAL_FAIL=0
             
             for OS in ubuntu-latest windows-latest; do
+              # SOURCE_DIR is now specific to the OS inside current-reports
               STATS_FILE="$SITE_DIR/$BUILD/$OS/stats.txt"
               if [ -f "$STATS_FILE" ]; then
                 # Example stats.txt content (after sed): 3 passed, 1 failed, 0 skipped, 0 untested, 0 broken
