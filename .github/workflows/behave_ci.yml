@@ -44,17 +44,15 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Install dependencies
-        shell: bash
         run: |
-          set +e
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # Ensure 'jq' is installed for robust JSON generation on Linux
+          # Install jq for JSON handling
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             sudo apt-get update
             sudo apt-get install -y jq
           fi
-          
+
       - name: Run Behave Tests
         id: run_behave_tests
         shell: bash
@@ -65,13 +63,11 @@ jobs:
           REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
           mkdir -p "$REPORT_DIR"
 
-          # Run tests and capture output
           behave --tags=@all --exclude "features/manual_tests" \
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_DIR/validation_report.html" --no-capture | tee /tmp/behave_output.txt
           TEST_EXIT_CODE=$?
 
-          # Determine the overall test result
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             if grep -q "failed" /tmp/behave_output.txt; then
               RESULT=UNSTABLE
@@ -86,8 +82,7 @@ jobs:
           echo "$RESULT" > "$REPORT_DIR/status.txt"
           echo "$(TZ='America/Los_Angeles' date)" > "$REPORT_DIR/timestamp.txt"
           
-          # --- FIX FOR TREND GRAPH STATISTICS ---
-          # Parse the behave output to extract scenario counts for summary.json
+          # --- FIX: Generate summary.json for trend chart ---
           STATS_LINE=$(grep 'scenarios\.' /tmp/behave_output.txt | tail -n 1)
 
           PASSED_SCENARIOS=$(echo "$STATS_LINE" | grep -o '[0-9]\+ passed' | awk '{print $1}')
@@ -101,8 +96,8 @@ jobs:
           else
             BROKEN_COUNT=0
           fi
-
-          # Use 'jq' to generate the JSON object 
+          
+          # Create the summary.json artifact using jq
           echo "{ \"statistic\": { \"passed\": ${PASSED_COUNT}, \"failed\": ${FAILED_COUNT}, \"broken\": ${BROKEN_COUNT} } }" | jq . > "$REPORT_DIR/summary.json"
           
           echo "Generated summary.json with Passed: ${PASSED_COUNT}, Failed: ${FAILED_COUNT}, Broken: ${BROKEN_COUNT}"
@@ -123,7 +118,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 🆕 FIX: Install JQ for JSON processing in the report job, required to read summary.json
+      # 🆕 FIX: Install JQ for JSON processing in the report job
       - name: Install JQ
         run: sudo apt-get update && sudo apt-get install -y jq
 
@@ -244,20 +239,20 @@ jobs:
           echo "</ul>" >> "$SITE_DIR/index.html"
 
           # Gather data for the chart (oldest to newest)
-          # Now reads actual test statistics from summary.json, which is guaranteed to exist and be valid JSON
+          # Fix: Reads actual test statistics from summary.json
           for BUILD in $CHART_BUILDS; do
             TOTAL_PASS=0
             TOTAL_FAIL=0   
             TOTAL_UNSTABLE=0 
             
             for OS in ubuntu-latest windows-latest; do
+              # ✅ FIX: Correct path to summary.json (Removed /widgets/)
               SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json"
               
               if [ -f "$SUMMARY_FILE" ]; then
-                # Reading 'passed', 'failed', and 'broken' (for UNSTABLE)
                 PASS_COUNT=$(jq -r '.statistic.passed // 0' "$SUMMARY_FILE" 2>/dev/null)
                 FAIL_COUNT=$(jq -r '.statistic.failed // 0' "$SUMMARY_FILE" 2>/dev/null)
-                BROKEN_COUNT=$(jq -r '.statistic.broken // 0' "$SUMMARY_FILE" 2>/dev/null) 
+                BROKEN_COUNT=$(jq -r '.statistic.broken // 0' "$SUMMARY_FILE" 2>/dev/null)
 
                 TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
                 TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
