@@ -24,8 +24,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
 
     outputs:
-      # FIX 1: Corrected step ID from 'run_tests' to 'run_behave_tests'
-      test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }} 
+      test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }}
 
     steps:
       - name: Checkout repository
@@ -50,10 +49,11 @@ jobs:
           set +e
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # FIX: Ensure 'jq' is installed for JSON handling on Linux
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             sudo apt-get update
             sudo apt-get install -y jq
+          else
+            choco install jq -y || true
           fi
 
       - name: Run Behave Tests
@@ -66,13 +66,11 @@ jobs:
           REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
           mkdir -p "$REPORT_DIR"
 
-          # Run Behave and capture output
           behave --tags=@all --exclude "features/manual_tests" \
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_DIR/validation_report.html" --no-capture | tee /tmp/behave_output.txt
           TEST_EXIT_CODE=$?
 
-          # Determine overall result
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             if grep -q "failed" /tmp/behave_output.txt; then
               RESULT=UNSTABLE
@@ -86,45 +84,19 @@ jobs:
           echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
           echo "$RESULT" > "$REPORT_DIR/status.txt"
           echo "$(TZ='America/Los_Angeles' date)" > "$REPORT_DIR/timestamp.txt"
-          
-          # --- ✅ FIX 3: Robustly parse test counts from scenario summary line using sed/grep ---
-          # Get the full summary line for scenarios (e.g., "59 scenarios passed, 3 failed, 0 skipped")
+
           SUMMARY_LINE=$(grep 'scenarios\.' /tmp/behave_output.txt | tail -n 1)
+          PASSED_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*([0-9]+) scenarios passed.*/\1/' 2>/dev/null | grep -o '^[0-9]\+$' || echo 0)
+          FAILED_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*, ([0-9]+) failed.*/\1/' 2>/dev/null | grep -o '^[0-9]\+$' || echo 0)
+          BROKEN_COUNT=$([ "$RESULT" = "UNSTABLE" ] && echo 1 || echo 0)
 
-          # Extract Passed count (number before 'scenarios passed'). Use more specific pattern matching.
-          # We check if the SUMMARY_LINE contains "passed" before trying to extract the number.
-          if echo "$SUMMARY_LINE" | grep -q 'passed'; then
-            PASSED_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*([0-9]+) scenarios passed.*/\1/' | grep -o '^[0-9]\+$' || echo 0)
-          else
-            PASSED_COUNT=0
-          fi
-          
-          # Extract Failed count (number before 'failed').
-          # We check if the SUMMARY_LINE contains "failed" before trying to extract the number.
-          if echo "$SUMMARY_LINE" | grep -q 'failed'; then
-            FAILED_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*, ([0-9]+) failed.*/\1/' | grep -o '^[0-9]\+$' || echo 0)
-          else
-            FAILED_COUNT=0
-          fi
-
-          if [ "$RESULT" = "UNSTABLE" ]; then
-            # If the build is unstable (i.e., tests failed), we mark one broken point on the graph
-            BROKEN_COUNT=1
-          else
-            BROKEN_COUNT=0
-          fi
-          
-          # Create the summary.json artifact using jq. This is CRITICAL for the chart data.
           echo "{ \"statistic\": { \"passed\": ${PASSED_COUNT}, \"failed\": ${FAILED_COUNT}, \"broken\": ${BROKEN_COUNT} } }" | jq . > "$REPORT_DIR/summary.json"
-          
           echo "Generated summary.json with Passed: ${PASSED_COUNT}, Failed: ${FAILED_COUNT}, Broken: ${BROKEN_COUNT}"
-          # --- END FIX 3 ---
 
       - uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.os }}
           path: reports/${{ github.run_number }}/${{ matrix.os }}/
-
 
   report:
     name: Generate Reports & Deploy
@@ -138,7 +110,6 @@ jobs:
       - name: Install JQ
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      # --- FIX 1: History Preservation ---
       - name: Get workflow filename
         id: get_workflow_name
         run: echo "WORKFLOW_FILE=$(basename .github/workflows/*.yml)" >> $GITHUB_ENV
@@ -157,10 +128,8 @@ jobs:
           mkdir -p "${{ env.SITE_DIR }}"
           if [ -d "previous-site" ]; then
             echo "♻️ Restoring previous site history..."
-            # Use cp -R to recursively copy all content, fixing the missing history issue.
-            cp -R previous-site/* "${{ env.SITE_DIR }}/" || true
+            rsync -a --ignore-existing previous-site/ "${{ env.SITE_DIR }}/"
           fi
-      # --- END FIX 1 ---
 
       - name: Download Test Results
         uses: actions/download-artifact@v4
@@ -177,17 +146,13 @@ jobs:
           for OS in ubuntu-latest windows-latest; do
             REPORT_DIR_BUILD="$SITE_DIR/$BUILD_NUMBER/$OS"
             REPORT_DIR_LATEST="$SITE_DIR/latest/$OS"
-            
-            # Ensure target directories exist
             mkdir -p "$REPORT_DIR_BUILD" "$REPORT_DIR_LATEST"
-
-            # ⚠️ This is where the downloaded artifacts (build-ubuntu-latest) are moved to the build history folder
             cp -R reports/build-$OS/* "$REPORT_DIR_BUILD/" || true
-            
-            # ✅ FIX 2: Copy new report to the /latest/ directory recursively to ensure all files (including validation_report.html) are there
             cp -R "$REPORT_DIR_BUILD/"* "$REPORT_DIR_LATEST/" || true
+            if [ ! -f "$REPORT_DIR_LATEST/index.html" ]; then
+              cp "$REPORT_DIR_BUILD/index.html" "$REPORT_DIR_LATEST/index.html"
+            fi
 
-            # Generate metadata files for the latest report
             REPO_NAME="${GITHUB_REPOSITORY##*/}"
             echo "{\"name\":\"$OS\",\"type\":\"GitHub Actions\",\"url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\",\"reportUrl\":\"https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/latest/$OS/\",\"buildOrder\":\"${BUILD_NUMBER}\",\"buildName\":\"Build ${BUILD_NUMBER} ($OS)\",\"buildUrl\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" > "$REPORT_DIR_LATEST/executor.json"
 
@@ -201,7 +166,6 @@ jobs:
           SITE_DIR="site"
           CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
           mkdir -p "$SITE_DIR"
-
           echo "<html><head><title>Reports History</title>
           <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
           <style>
@@ -210,13 +174,9 @@ jobs:
           li{margin:6px 0;}
           a{text-decoration:none;color:#0366d6;}
           a:hover{text-decoration:underline;}
-          #chart-container {
-            max-width: 600px;
-            max-height: 300px;
-            margin: 0; 
-          }
+          #chart-container {max-width:600px;max-height:300px;margin:0;}
           </style></head><body>
-          <h1>🤖 Hyperscale SSD Framework Simulation CI/CD Build History</h1>
+          <h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>
           <h2>🧩 Latest Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
 
           for OS in ubuntu-latest windows-latest; do
@@ -228,60 +188,44 @@ jobs:
               echo "<li><strong>$OS:</strong> (No report found)</li>" >> "$SITE_DIR/index.html"
             fi
           done
+          echo "</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2><ul>" >> "$SITE_DIR/index.html"
 
-          echo "</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2>" >> "$SITE_DIR/index.html"
-          # Sort builds newest to oldest for the list
           BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr)
-          
-          echo "<ul>" >> "$SITE_DIR/index.html"
-          # Data for chart needs to be in ascending order (oldest to newest)
           CHART_BUILDS=$(echo "$BUILDS" | sort -n)
           LABELS=""
           PASS_COUNTS=""
           FAIL_COUNTS=""
           UNSTABLE_COUNTS=""
 
-          # Generate the visible list of links (newest to oldest)
           for BUILD in $BUILDS; do
             TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "")
             TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
-
             echo "<li><strong>Build #${BUILD}</strong> (Run: $TS_DISPLAY) - <a href='${BUILD}/ubuntu-latest/'>Ubuntu</a> / <a href='${BUILD}/windows-latest/'>Windows</a></li>" >> "$SITE_DIR/index.html"
           done
           echo "</ul>" >> "$SITE_DIR/index.html"
 
-          # Gather data for the chart (oldest to newest)
           for BUILD in $CHART_BUILDS; do
             TOTAL_PASS=0
-            TOTAL_FAIL=0   
-            TOTAL_UNSTABLE=0 
-            
+            TOTAL_FAIL=0
+            TOTAL_UNSTABLE=0
             for OS in ubuntu-latest windows-latest; do
-              # The summary.json is generated in the root of the build folder, not in /widgets/
-              SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json" 
-              
+              SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json"
               if [ -f "$SUMMARY_FILE" ]; then
-                # Use robust jq to read values, defaulting to 0
-                PASS_COUNT=$(jq -r '.statistic.passed // 0' "$SUMMARY_FILE" 2>/dev/null)
-                FAIL_COUNT=$(jq -r '.statistic.failed // 0' "$SUMMARY_FILE" 2>/dev/null)
-                BROKEN_COUNT=$(jq -r '.statistic.broken // 0' "$SUMMARY_FILE" 2>/dev/null)
-
+                PASS_COUNT=$(jq -r '.statistic.passed // 0 | tonumber' "$SUMMARY_FILE")
+                FAIL_COUNT=$(jq -r '.statistic.failed // 0 | tonumber' "$SUMMARY_FILE")
+                BROKEN_COUNT=$(jq -r '.statistic.broken // 0 | tonumber' "$SUMMARY_FILE")
                 TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
                 TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
                 TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + BROKEN_COUNT))
               fi
             done
-            
             LABELS="$LABELS'$BUILD',"
             PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
-            UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
             FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
+            UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
           done
 
-          # The canvas is correctly wrapped in a controlled div
-          echo "<div id='chart-container'>
-          <canvas id='trendChart'></canvas>
-          </div>
+          echo "<div id='chart-container'><canvas id='trendChart'></canvas></div>
           <script>
           const ctx = document.getElementById('trendChart').getContext('2d');
           new Chart(ctx, {
@@ -294,34 +238,17 @@ jobs:
                 {label: 'UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
               ]
             },
-            options: { 
-              responsive: true, 
-              maintainAspectRatio: false, 
-              plugins: { legend: { position: 'top' } }, 
-              scales: { 
-                y: { 
-                  beginAtZero: true, 
-                  stepSize: 1,
-                  min: 0,
-                  suggestedMax: 10, 
-                  // Y-axis title
-                  title: {
-                    display: true,
-                    text: 'Total Number of Tests'
-                  }
-                },
-                x: {
-                  // X-axis title
-                  title: {
-                    display: true,
-                    text: 'Build Number'
-                  }
-                }
-              } 
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { position: 'top' } },
+              scales: {
+                y: { beginAtZero: true, stepSize: 1, min: 0, suggestedMax: 10, title: { display: true, text: 'Total Number of Tests' } },
+                x: { title: { display: true, text: 'Build Number' } }
+              }
             }
           });
-          </script>
-          <hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
+          </script><hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
@@ -332,12 +259,10 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-      # FIX 1: Upload the history artifact *after* deployment
       - name: Upload History Artifact
         uses: actions/upload-artifact@v4
         with:
           name: history
-          # Upload the entire site directory containing all build folders
           path: ${{ env.SITE_DIR }}
           retention-days: 7
 
@@ -358,7 +283,7 @@ jobs:
             STATUS_TEXT="All tests passed"
           fi
 
-          echo "### 🤖 Hyperscale SSD Framework Simulation CI/CD" >> $GITHUB_STEP_SUMMARY
+          echo "### 🤖 Hyperscale SSD Framework CI/CD" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "[![Ubuntu Latest Report](https://img.shields.io/badge/Ubuntu-Latest_Build-blue)](${BASE_URL}/latest/ubuntu-latest/index.html)" >> $GITHUB_STEP_SUMMARY
           echo "[![Windows Latest Report](https://img.shields.io/badge/Windows-Latest_Build-blue)](${BASE_URL}/latest/windows-latest/index.html)" >> $GITHUB_STEP_SUMMARY
