@@ -129,88 +129,115 @@ jobs:
           done
           cp artifacts/timestamp-*/*.txt "$SITE_DIR/latest/" || true
 
-      - name: Generate History and Trend Page
+      - name: Generate and update build history
+        if: always()
         run: |
-          mkdir -p $SITE_DIR
-          HISTORY_FILE="$SITE_DIR/history.json"
+          mkdir -p history
+          HISTORY_FILE=history/history.json
+          BUILD_DIR="latest"
 
-          python - <<'PYCODE'
-          import json, os, datetime, pytz, matplotlib.pyplot as plt
-          from jinja2 import Template
+          # Get current time in PDT
+          TIMESTAMP=$(TZ='America/Los_Angeles' date +"%Y-%m-%d %H:%M:%S PDT")
 
-          site_dir = os.environ["SITE_DIR"]
-          history_file = os.path.join(site_dir, "history.json")
-          tz = pytz.timezone(os.environ.get("TIMEZONE", "America/Los_Angeles"))
-          now_pdt = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+          # Determine status
+          STATUS="${{ job.status }}"
+          if [[ "$STATUS" == "success" ]]; then
+            RESULT="PASS"
+          elif [[ "$STATUS" == "failure" ]]; then
+            RESULT="FAIL"
+          else
+            RESULT="UNSTABLE"
+          fi
 
-          result = os.environ.get("RESULT", "UNKNOWN")
-          build = int(os.getenv("GITHUB_RUN_NUMBER", "0"))
+          # Append to history.json
+          echo "Updating build history..."
+          jq --arg bn "${{ github.run_number }}" \
+             --arg ts "$TIMESTAMP" \
+             --arg st "$RESULT" \
+             --arg ul "${{ env.SITE_DIR }}/ubuntu-latest/validation_report.html" \
+             --arg wl "${{ env.SITE_DIR }}/windows-latest/validation_report.html" \
+             '. + [{"build":$bn, "timestamp":$ts, "status":$st, "ubuntu_link":$ul, "windows_link":$wl}]' \
+             history.json 2>/dev/null | jq 'unique_by(.build) | sort_by(.build)' > history.tmp || \
+             echo '[{"build":'${{ github.run_number }}',"timestamp":"'$TIMESTAMP'","status":"'$RESULT'"}]' > history.tmp
 
-          # ✅ FIX: Skip adding UNKNOWN results if no tests were run
-          if result == "UNKNOWN":
-              print(f"⚠️  No test result found for Build #{build}, defaulting to FAIL.")
-              result = "FAIL"
+          mv history.tmp history.json
 
-          new_entry = {
-              "build": build,
-              "result": result,
-              "timestamp": now_pdt
-          }
+          # Create history.html
+          python3 <<'EOF'
+          import json, datetime, pytz
+          from pathlib import Path
 
-          # Keep previous history
-          if os.path.exists(history_file):
-              data = json.load(open(history_file))
-              # Remove duplicates for same build
-              data = [d for d in data if d["build"] != build]
-          else:
-              data = []
+          data = json.load(open("history.json"))
+          data.sort(key=lambda x: x["build"], reverse=True)
+          latest = data[0]
 
-          data.append(new_entry)
-          data.sort(key=lambda x: x["build"])
+          html = """
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <title>Hyperscale SSD Framework CI/CD History</title>
+            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 30px; background: #f5f7fa; }
+              h1, h2 { color: #333; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+              th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+              .pass { color: green; }
+              .fail { color: red; }
+              .unstable { color: orange; }
+            </style>
+          </head>
+          <body>
+            <h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>
+            <h2>🧩 Latest Reports</h2>
+            <ul>
+              <li>Ubuntu: <a href="{ul}">{ul}</a></li>
+              <li>Windows: <a href="{wl}">{wl}</a></li>
+            </ul>
 
-          with open(history_file, "w") as f:
-              json.dump(data, f, indent=2)
+            <h2>📜 Build History</h2>
+            <table>
+              <tr><th>Build</th><th>Timestamp (PDT)</th><th>Status</th></tr>
+          """.format(ul=latest["ubuntu_link"], wl=latest["windows_link"])
 
-          # Prepare trend counts
-          pass_count = sum(1 for d in data if d["result"] == "PASS")
-          fail_count = sum(1 for d in data if d["result"] == "FAIL")
-          unstable_count = sum(1 for d in data if d["result"] == "UNSTABLE")
+          for entry in data:
+              cls = entry["status"].lower()
+              html += f'<tr><td><a href="{entry["ubuntu_link"]}">#{entry["build"]}</a></td><td>{entry["timestamp"]}</td><td class="{cls}">{entry["status"]}</td></tr>'
 
-          plt.figure(figsize=(6,4))
-          plt.bar(["PASS","FAIL","UNSTABLE"], [pass_count, fail_count, unstable_count],
-                  color=["green","red","orange"])
-          plt.title(f"Build Trend (Total {len(data)})")
-          plt.ylabel("Count")
-          plt.tight_layout()
-          plt.savefig(os.path.join(site_dir, "trend_chart.svg"), format="svg")
+          # Trend chart data
+          counts = {"PASS":0, "FAIL":0, "UNSTABLE":0}
+          for e in data: counts[e["status"]] = counts.get(e["status"], 0)+1
 
-          # Build HTML table
-          template = Template("""
-          <html><head><title>Hyperscale SSD Build History</title></head>
-          <body style="font-family:sans-serif;margin:20px;">
-          <h2>🤖 Hyperscale SSD Framework CI/CD Build History</h2>
-          <p><b>Last updated:</b> {{ now_pdt }}</p>
-          <h3>📜 Build History</h3>
-          <table border="1" cellpadding="5" cellspacing="0">
-            <tr><th>Build #</th><th>Result</th><th>Timestamp (PDT)</th></tr>
-            {% for e in history %}
-              <tr>
-                <td>{{ e.build }}</td>
-                <td style="color:{% if e.result=='PASS' %}green{% elif e.result=='UNSTABLE' %}orange{% else %}red{% endif %};font-weight:bold;">
-                  {{ e.result }}
-                </td>
-                <td>{{ e.timestamp }}</td>
-              </tr>
-            {% endfor %}
-          </table>
-          <h3>📊 Trend Chart</h3>
-          <img src="trend_chart.svg" width="600"/>
-          <p><em>Generated automatically on {{ now_pdt }}</em></p>
+          html += f"""
+            </table>
+            <h2>📊 Trend Chart</h2>
+            <canvas id="trendChart" height="100"></canvas>
+            <script>
+              const ctx = document.getElementById('trendChart');
+              new Chart(ctx, {{
+                type: 'bar',
+                data: {{
+                  labels: ['PASS', 'FAIL', 'UNSTABLE'],
+                  datasets: [{{
+                    label: 'Build Outcome Ratios',
+                    data: [{counts["PASS"]}, {counts["FAIL"]}, {counts["UNSTABLE"]}],
+                    backgroundColor: ['#28a745', '#dc3545', '#ffc107']
+                  }}]
+                }},
+                options: {{
+                  scales: {{
+                    y: {{ beginAtZero: true }}
+                  }}
+                }}
+              }});
+            </script>
           </body></html>
-          """)
-          with open(os.path.join(site_dir, "history.html"), "w") as f:
-              f.write(template.render(history=data, now_pdt=now_pdt))
-          PYCODE
+          """
+          Path("history.html").write_text(html)
+          EOF
+
+          cp history.json history.html ${{ env.SITE_DIR }}/
+
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
