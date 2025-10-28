@@ -44,7 +44,7 @@ jobs:
           REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
           mkdir -p "$REPORT_DIR"
 
-          behave --tags=@adv --exclude "features/manual_tests" \
+          behave --tags=@walking --exclude "features/manual_tests" \
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_DIR/validation_report.html" --no-capture | tee /tmp/behave_output.txt
           TEST_EXIT_CODE=$?
