@@ -1,19 +1,9 @@
-name: Hyperscale SSD Framework CI/CD
+name: Hyperscale SSD CI
 
 on:
   push:
-    branches: [ main ]
   pull_request:
   workflow_dispatch:
-
-permissions:
-  contents: write
-  pages: write
-  id-token: write
-
-env:
-  SITE_DIR: site
-  TIMEZONE: America/Los_Angeles
 
 jobs:
   test:
@@ -36,7 +26,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install behave-html-pretty-formatter pytz
+          pip install behave-html-pretty-formatter jq
 
       - name: Run Behave Tests
         id: run_behave_tests
@@ -46,231 +36,123 @@ jobs:
           OS_NAME=${{ matrix.os }}
           BUILD_NUMBER=${{ github.run_number }}
           REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
-          REPORT_PATH="$REPORT_DIR/validation_report.html"
-          STATS_FILE="$REPORT_DIR/stats.txt"
-
           mkdir -p "$REPORT_DIR"
 
-          echo "🔍 Running tests on $OS_NAME..."
           behave --tags=@adv --exclude "features/manual_tests" \
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
-            -o "$REPORT_PATH" --no-capture | tee /tmp/behave_output.txt
-
+            -o "$REPORT_DIR/validation_report.html" --no-capture | tee /tmp/behave_output.txt
           TEST_EXIT_CODE=$?
-
-          grep 'Features:' /tmp/behave_output.txt | sed 's/Features: //' > "$STATS_FILE"
 
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             if grep -q "failed" /tmp/behave_output.txt; then
-                RESULT=UNSTABLE
+              RESULT=UNSTABLE
             else
-                RESULT=FAIL
+              RESULT=FAIL
             fi
           else
             RESULT=PASS
           fi
+          echo "Detected result: $RESULT"
           echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
-          exit 0
-
-      - name: Create PDT Timestamp
-        shell: bash
-        run: |
-          python - <<'PYCODE'
-          import datetime, pytz
-          tz = pytz.timezone("America/Los_Angeles")
-          now_pdt = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
-          print(now_pdt, file=open("timestamp_pdt.txt", "w"))
-          PYCODE
+          echo "$RESULT" > "$REPORT_DIR/status.txt"
+          echo "$(TZ='America/Los_Angeles' date)" > "$REPORT_DIR/timestamp.txt"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: timestamp-${{ matrix.os }}
-          path: timestamp_pdt.txt
+          name: build-${{ matrix.os }}
+          path: reports/${{ github.run_number }}/${{ matrix.os }}/
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: validation-report-${{ matrix.os }}
-          path: reports/${{ github.run_number }}/${{ matrix.os }}
 
-  report:
-    name: Generate History + Trend + Deploy
-    needs: [test]
+  update-history:
+    name: Update History and Deploy
     runs-on: ubuntu-latest
+    needs: [test]
+
     env:
       SITE_DIR: site
-      TIMEZONE: America/Los_Angeles
-      RESULT: ${{ needs.test.outputs.test_outcome }}   # ✅ FIX: Propagate test result to env
 
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
 
-      - name: Install tools
-        run: |
-          python -m pip install jinja2 matplotlib pytz
-
-      - name: Setup site directories
-        run: mkdir -p $SITE_DIR/latest
-
-      - name: Download artifacts
+      - name: Download all reports
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: reports
 
-      - name: Organize reports
-        run: |
-          for os in ubuntu-latest windows-latest; do
-            mkdir -p "$SITE_DIR/latest/$os"
-            if [ -d "artifacts/validation-report-$os" ]; then
-              cp -r artifacts/validation-report-$os/* "$SITE_DIR/latest/$os/"
-            fi
-          done
-          cp artifacts/timestamp-*/*.txt "$SITE_DIR/latest/" || true
-
-      - name: Generate and update build history
-        if: always()
+      - name: Merge and generate build history
         run: |
           mkdir -p history
+          mkdir -p $SITE_DIR
           HISTORY_JSON="history/history.json"
-
-          # Current metadata
-          BUILD="${{ github.run_number }}"
-          OS="${{ matrix.os }}"
-          STATUS="${{ steps.run_behave_tests.outputs.test_outcome }}"
+          BUILD_NUMBER=${{ github.run_number }}
           TIMESTAMP=$(TZ='America/Los_Angeles' date +"%Y-%m-%d %H:%M:%S PDT")
 
-          UBUNTU_LINK="latest/ubuntu-latest/validation_report.html"
-          WINDOWS_LINK="latest/windows-latest/validation_report.html"
-
-          # Create history.json if missing
+          # Create JSON if missing
           if [ ! -f "$HISTORY_JSON" ]; then
             echo "[]" > "$HISTORY_JSON"
           fi
 
-          # Build entry for this OS
-          ENTRY=$(jq -n \
-            --arg build "$BUILD" \
-            --arg os "$OS" \
-            --arg status "$STATUS" \
-            --arg timestamp "$TIMESTAMP" \
-            --arg ul "$UBUNTU_LINK" \
-            --arg wl "$WINDOWS_LINK" \
-            '{build: ($build|tonumber), timestamp: $timestamp, results: {($os): $status}, links: {ubuntu: $ul, windows: $wl}}')
+          # Detect per-OS results from downloaded artifacts
+          UBUNTU_RESULT=$(cat reports/build-ubuntu-latest/status.txt 2>/dev/null || echo "UNKNOWN")
+          WINDOWS_RESULT=$(cat reports/build-windows-latest/status.txt 2>/dev/null || echo "UNKNOWN")
 
-          # Merge logic:
-          # - If build exists, update only the corresponding OS result.
-          # - Otherwise, append a new entry.
-          jq --argjson new "$ENTRY" '
-            (map(select(.build == $new.build)) | length) as $exists |
-            if $exists == 0 then
-              . + [$new]
-            else
-              map(if .build == $new.build then
-                    .results += $new.results |
-                    .links = $new.links |
-                    .timestamp = $new.timestamp
+          UBUNTU_LINK="reports/$BUILD_NUMBER/ubuntu-latest/validation_report.html"
+          WINDOWS_LINK="reports/$BUILD_NUMBER/windows-latest/validation_report.html"
+
+          jq --argjson build "$BUILD_NUMBER" \
+             --arg timestamp "$TIMESTAMP" \
+             --arg ur "$UBUNTU_RESULT" \
+             --arg wr "$WINDOWS_RESULT" \
+             --arg ul "$UBUNTU_LINK" \
+             --arg wl "$WINDOWS_LINK" \
+             '
+             (map(select(.build == $build)) | length) as $exists |
+             if $exists == 0 then
+               . + [{build: $build, timestamp: $timestamp, results: {"ubuntu-latest": $ur, "windows-latest": $wr}, links: {"ubuntu": $ul, "windows": $wl}}]
+             else
+               map(if .build == $build then
+                    .results["ubuntu-latest"] = $ur |
+                    .results["windows-latest"] = $wr |
+                    .timestamp = $timestamp |
+                    .links = {"ubuntu": $ul, "windows": $wl}
                   else . end)
-            end
-          ' "$HISTORY_JSON" > history.tmp && mv history.tmp "$HISTORY_JSON"
+             end
+             ' "$HISTORY_JSON" > tmp.json && mv tmp.json "$HISTORY_JSON"
 
           # Generate HTML dashboard
           python3 <<'EOF'
           import json
           from pathlib import Path
-
-          path = Path("history/history.json")
-          if not path.exists():
-              exit(0)
-
-          with open(path) as f:
-              data = json.load(f)
-
-          # Sort by build descending
+          f = Path("history/history.json")
+          if not f.exists(): exit(0)
+          data = json.load(f)
           data.sort(key=lambda x: x["build"], reverse=True)
 
-          # Count per status
-          counts = {"PASS": 0, "FAIL": 0, "UNSTABLE": 0}
-          for entry in data:
-              for status in entry.get("results", {}).values():
-                  if status in counts:
-                      counts[status] += 1
+          html = ["<html><head><meta charset='UTF-8'><title>Hyperscale SSD Framework CI/CD History</title>",
+                  "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>",
+                  "<style>body{font-family:Arial;margin:20px;background:#f7f9fc;}table{border-collapse:collapse;width:100%;}th,td{border-bottom:1px solid #ddd;padding:8px;}</style></head><body>",
+                  "<h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>",
+                  "<h2>🧩 Latest Reports</h2><ul>"]
 
-          html = """<html>
-          <head>
-            <meta charset='UTF-8'>
-            <title>Hyperscale SSD Framework CI/CD History</title>
-            <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
-            <style>
-              body { font-family: Arial, sans-serif; margin: 40px; background: #f7f9fc; }
-              h1, h2 { color: #333; }
-              table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-              th, td { padding: 8px; border-bottom: 1px solid #ddd; }
-              .pass { color: green; }
-              .fail { color: red; }
-              .unstable { color: orange; }
-            </style>
-          </head>
-          <body>
-            <h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>
-            <h2>🧩 Latest Reports</h2>
-          """
-
-          # Show links to latest build reports
           latest = data[0]
-          html += f"""
-            <ul>
-              <li>Ubuntu: <a href="{latest['links']['ubuntu']}">{latest['links']['ubuntu']}</a></li>
-              <li>Windows: <a href="{latest['links']['windows']}">{latest['links']['windows']}</a></li>
-            </ul>
-            <h2>📜 Build History</h2>
-            <table>
-              <tr><th>Build</th><th>Timestamp (PDT)</th><th>Ubuntu</th><th>Windows</th></tr>
-          """
+          html.append(f"<li>Ubuntu: <a href='{latest['links']['ubuntu']}'>Report</a> ({latest['results'].get('ubuntu-latest','UNKNOWN')})</li>")
+          html.append(f"<li>Windows: <a href='{latest['links']['windows']}'>Report</a> ({latest['results'].get('windows-latest','UNKNOWN')})</li>")
+          html.append("</ul><h2>📜 Build History</h2><table><tr><th>Build</th><th>Timestamp (PDT)</th><th>Ubuntu</th><th>Windows</th></tr>")
 
-          for entry in data:
-              ubuntu_status = entry["results"].get("ubuntu-latest", "N/A")
-              windows_status = entry["results"].get("windows-latest", "N/A")
-              cls_u = ubuntu_status.lower()
-              cls_w = windows_status.lower()
-              html += (
-                  f"<tr>"
-                  f"<td><a href='{entry['links']['ubuntu']}'>#{entry['build']}</a></td>"
-                  f"<td>{entry['timestamp']}</td>"
-                  f"<td class='{cls_u}'>{ubuntu_status}</td>"
-                  f"<td class='{cls_w}'>{windows_status}</td>"
-                  f"</tr>"
-              )
+          counts = {"PASS":0,"FAIL":0,"UNSTABLE":0}
+          for e in data:
+              u = e["results"].get("ubuntu-latest","UNKNOWN")
+              w = e["results"].get("windows-latest","UNKNOWN")
+              for s in (u,w):
+                  if s in counts: counts[s]+=1
+              html.append(f"<tr><td>#{e['build']}</td><td>{e['timestamp']}</td><td>{u}</td><td>{w}</td></tr>")
 
-          html += f"""
-            </table>
-            <h2>📊 Trend Chart</h2>
-            <canvas id="trendChart" height="100"></canvas>
-            <script>
-              const ctx = document.getElementById('trendChart');
-              new Chart(ctx, {{
-                type: 'bar',
-                data: {{
-                  labels: ['PASS', 'FAIL', 'UNSTABLE'],
-                  datasets: [{{
-                    label: 'Build Outcome Ratios',
-                    data: [{counts["PASS"]}, {counts["FAIL"]}, {counts["UNSTABLE"]}],
-                    backgroundColor: ['#28a745', '#dc3545', '#ffc107']
-                  }}]
-                }},
-                options: {{
-                  scales: {{ y: {{ beginAtZero: true }} }}
-                }}
-              }});
-            </script>
-          </body></html>
-          """
-
-          Path("history.html").write_text(html)
+          html.append("</table><h2>📊 Trend Chart</h2><canvas id='trendChart' height='120'></canvas><script>const ctx=document.getElementById('trendChart');new Chart(ctx,{type:'bar',data:{labels:['PASS','FAIL','UNSTABLE'],datasets:[{label:'Count',data:[%d,%d,%d],backgroundColor:['#28a745','#dc3545','#ffc107']}]}});</script>" % (counts['PASS'],counts['FAIL'],counts['UNSTABLE']))
+          html.append("</body></html>")
+          Path("history.html").write_text("\n".join(html))
           EOF
 
-          cp history.html history/history.json ${{ env.SITE_DIR }}/
+          cp -r reports history.html history $SITE_DIR/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -285,14 +167,8 @@ jobs:
         if: always()
         run: |
           PAGE_URL="${{ steps.deployment.outputs.page_url }}"
-          RESULT="${{ env.RESULT }}"
           echo "### 💾 Hyperscale SSD Framework CI/CD Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Build #${{ github.run_number }} Result:** $RESULT" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[![Ubuntu Report](https://img.shields.io/badge/Ubuntu-Latest-blue)](${PAGE_URL}/latest/ubuntu-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
-          echo "[![Windows Report](https://img.shields.io/badge/Windows-Latest-blue)](${PAGE_URL}/latest/windows-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Ubuntu Report](https://img.shields.io/badge/Ubuntu-Latest-blue)](${PAGE_URL}/reports/${{ github.run_number }}/ubuntu-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Windows Report](https://img.shields.io/badge/Windows-Latest-blue)](${PAGE_URL}/reports/${{ github.run_number }}/windows-latest/validation_report.html)" >> $GITHUB_STEP_SUMMARY
           echo "[![History](https://img.shields.io/badge/View-History-green)](${PAGE_URL}/history.html)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📊 **Trend Chart**" >> $GITHUB_STEP_SUMMARY
-          echo "<img src='${PAGE_URL}/trend_chart.svg' width='600'/>" >> $GITHUB_STEP_SUMMARY
+          echo "**Build #${{ github.run_number }} Results:** Ubuntu=${{ needs.test.outputs.test_outcome }} / Windows=${{ needs.test.outputs.test_outcome }}" >> $GITHUB_STEP_SUMMARY
