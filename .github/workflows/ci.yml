@@ -24,7 +24,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
 
     outputs:
-      test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }} 
+      test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }}
 
     steps:
       - name: Checkout repository
@@ -78,22 +78,26 @@ jobs:
           else
             RESULT=PASS
           fi
-          echo "Detected result: $RESULT"
+
           echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
           echo "$RESULT" > "$REPORT_DIR/status.txt"
           echo "$(TZ='America/Los_Angeles' date)" > "$REPORT_DIR/timestamp.txt"
 
-          # --- FIXED PARSING LOGIC ---
-          SUMMARY_LINE=$(grep -E '([0-9]+\s+scenarios?)' /tmp/behave_output.txt | tail -n 1 || true)
-          PASSED_COUNT=$(echo "$SUMMARY_LINE" | grep -oE '([0-9]+)\s+passed' | awk '{print $1}' | tail -n 1 || echo 0)
-          FAILED_COUNT=$(echo "$SUMMARY_LINE" | grep -oE '([0-9]+)\s+failed' | awk '{print $1}' | tail -n 1 || echo 0)
-          BROKEN_COUNT=$(echo "$SUMMARY_LINE" | grep -oE '([0-9]+)\s+broken' | awk '{print $1}' | tail -n 1 || echo 0)
-          if [ "$RESULT" = "UNSTABLE" ] && [ "$BROKEN_COUNT" -eq 0 ]; then
-            BROKEN_COUNT=1
+          # --- FIX: Robust parsing from HTML or fallback to stdout ---
+          HTML_REPORT="$REPORT_DIR/validation_report.html"
+          if [ -f "$HTML_REPORT" ]; then
+            PASSED_COUNT=$(grep -oE '[0-9]+(?= scenarios? passed)' "$HTML_REPORT" | head -n 1 || echo 0)
+            FAILED_COUNT=$(grep -oE '[0-9]+(?= scenarios? failed)' "$HTML_REPORT" | head -n 1 || echo 0)
+            BROKEN_COUNT=$(grep -oE '[0-9]+(?= scenarios? broken)' "$HTML_REPORT" | head -n 1 || echo 0)
+          else
+            SUMMARY_LINE=$(grep -E '([0-9]+\s+scenarios?)' /tmp/behave_output.txt | tail -n 1 || true)
+            PASSED_COUNT=$(echo "$SUMMARY_LINE" | grep -oE '([0-9]+)\s+passed' | awk '{print $1}' | tail -n 1 || echo 0)
+            FAILED_COUNT=$(echo "$SUMMARY_LINE" | grep -oE '([0-9]+)\s+failed' | awk '{print $1}' | tail -n 1 || echo 0)
+            BROKEN_COUNT=$(echo "$SUMMARY_LINE" | grep -oE '([0-9]+)\s+broken' | awk '{print $1}' | tail -n 1 || echo 0)
           fi
 
           echo "{ \"statistic\": { \"passed\": ${PASSED_COUNT}, \"failed\": ${FAILED_COUNT}, \"broken\": ${BROKEN_COUNT} } }" | jq . > "$REPORT_DIR/summary.json"
-          echo "Generated summary.json with Passed: ${PASSED_COUNT}, Failed: ${FAILED_COUNT}, Broken: ${BROKEN_COUNT}"
+          echo "Generated summary.json with Passed=$PASSED_COUNT Failed=$FAILED_COUNT Broken=$BROKEN_COUNT"
           # --- END FIX ---
 
       - uses: actions/upload-artifact@v4
@@ -114,17 +118,13 @@ jobs:
       - name: Install JQ
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Get workflow filename
-        id: get_workflow_name
-        run: echo "WORKFLOW_FILE=$(basename .github/workflows/*.yml)" >> $GITHUB_ENV
-
+      # --- FIX: Correct history restoration ---
       - name: Download previous history artifact
         uses: dawidd6/action-download-artifact@v6
         with:
-          workflow: ${{ env.WORKFLOW_FILE }}
-          branch: main
           name: history
           path: previous-site
+          branch: main
           if_no_artifact_found: ignore
 
       - name: Restore History
@@ -132,8 +132,9 @@ jobs:
           mkdir -p "${{ env.SITE_DIR }}"
           if [ -d "previous-site" ]; then
             echo "♻️ Restoring previous site history..."
-            rsync -a previous-site/ "${{ env.SITE_DIR }}/"
+            cp -R previous-site/* "${{ env.SITE_DIR }}/" || true
           fi
+      # --- END FIX ---
 
       - name: Download Test Results
         uses: actions/download-artifact@v4
@@ -151,21 +152,17 @@ jobs:
             REPORT_DIR_BUILD="$SITE_DIR/$BUILD_NUMBER/$OS"
             REPORT_DIR_LATEST="$SITE_DIR/latest/$OS"
             mkdir -p "$REPORT_DIR_BUILD" "$REPORT_DIR_LATEST"
-
             cp -R reports/build-$OS/* "$REPORT_DIR_BUILD/" || true
             cp -R "$REPORT_DIR_BUILD/"* "$REPORT_DIR_LATEST/" || true
 
-            # --- FIX: ensure each build has index.html ---
+            # ✅ FIX: Ensure validation_report.html → index.html
             if [ -f "$REPORT_DIR_BUILD/validation_report.html" ]; then
               cp "$REPORT_DIR_BUILD/validation_report.html" "$REPORT_DIR_BUILD/index.html"
               cp "$REPORT_DIR_BUILD/validation_report.html" "$REPORT_DIR_LATEST/index.html"
-            else
-              echo "No validation_report.html found for $OS in build $BUILD_NUMBER"
             fi
 
             REPO_NAME="${GITHUB_REPOSITORY##*/}"
             echo "{\"name\":\"$OS\",\"type\":\"GitHub Actions\",\"url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\",\"reportUrl\":\"https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/latest/$OS/\",\"buildOrder\":\"${BUILD_NUMBER}\",\"buildName\":\"Build ${BUILD_NUMBER} ($OS)\",\"buildUrl\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" > "$REPORT_DIR_LATEST/executor.json"
-
             date -u > "$REPORT_DIR_BUILD/build-info.txt"
             date -u > "$REPORT_DIR_LATEST/build-info.txt"
           done
@@ -176,9 +173,17 @@ jobs:
           SITE_DIR="site"
           CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
           mkdir -p "$SITE_DIR"
+
           echo "<html><head><title>Reports History</title>
           <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
-          <style>body{font-family:sans-serif;margin:20px;}ul{list-style:none;padding:0;}li{margin:6px 0;}a{text-decoration:none;color:#0366d6;}a:hover{text-decoration:underline;}#chart-container{max-width:600px;max-height:300px;margin:0;}</style></head><body>
+          <style>
+          body{font-family:sans-serif;margin:20px;}
+          ul{list-style:none;padding:0;}
+          li{margin:6px 0;}
+          a{text-decoration:none;color:#0366d6;}
+          a:hover{text-decoration:underline;}
+          #chart-container {max-width:600px;max-height:300px;margin:0;}
+          </style></head><body>
           <h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>
           <h2>🧩 Latest Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
 
@@ -193,14 +198,13 @@ jobs:
           done
 
           echo "</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2>" >> "$SITE_DIR/index.html"
-
           BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr)
           echo "<ul>" >> "$SITE_DIR/index.html"
           CHART_BUILDS=$(echo "$BUILDS" | sort -n)
           LABELS=""; PASS_COUNTS=""; FAIL_COUNTS=""; UNSTABLE_COUNTS=""
 
           for BUILD in $BUILDS; do
-            TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "")
+            TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "N/A")
             TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
             echo "<li><strong>Build #${BUILD}</strong> (Run: $TS_DISPLAY) - <a href='${BUILD}/ubuntu-latest/'>Ubuntu</a> / <a href='${BUILD}/windows-latest/'>Windows</a></li>" >> "$SITE_DIR/index.html"
           done
@@ -211,9 +215,9 @@ jobs:
             for OS in ubuntu-latest windows-latest; do
               SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json"
               if [ -f "$SUMMARY_FILE" ]; then
-                PASS_COUNT=$(jq -r '.statistic.passed // 0 | tonumber' "$SUMMARY_FILE")
-                FAIL_COUNT=$(jq -r '.statistic.failed // 0 | tonumber' "$SUMMARY_FILE")
-                BROKEN_COUNT=$(jq -r '.statistic.broken // 0 | tonumber' "$SUMMARY_FILE")
+                PASS_COUNT=$(jq -r '.statistic.passed // 0' "$SUMMARY_FILE" 2>/dev/null)
+                FAIL_COUNT=$(jq -r '.statistic.failed // 0' "$SUMMARY_FILE" 2>/dev/null)
+                BROKEN_COUNT=$(jq -r '.statistic.broken // 0' "$SUMMARY_FILE" 2>/dev/null)
                 TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
                 TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
                 TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + BROKEN_COUNT))
@@ -228,12 +232,20 @@ jobs:
           echo "<div id='chart-container'><canvas id='trendChart'></canvas></div>
           <script>
           const ctx=document.getElementById('trendChart').getContext('2d');
-          new Chart(ctx,{type:'line',data:{labels:[${LABELS%,}],datasets:[
-          {label:'PASS',data:[${PASS_COUNTS%,}],borderColor:'green',fill:false},
-          {label:'FAIL',data:[${FAIL_COUNTS%,}],borderColor:'red',fill:false},
-          {label:'UNSTABLE',data:[${UNSTABLE_COUNTS%,}],borderColor:'orange',fill:false}
-          ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Total Number of Tests'}},x:{title:{display:true,text:'Build Number'}}}}});
-          </script><hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
+          new Chart(ctx,{
+            type:'line',
+            data:{labels:[${LABELS%,}],
+              datasets:[
+                {label:'PASS',data:[${PASS_COUNTS%,}],borderColor:'green',fill:false},
+                {label:'FAIL',data:[${FAIL_COUNTS%,}],borderColor:'red',fill:false},
+                {label:'UNSTABLE',data:[${UNSTABLE_COUNTS%,}],borderColor:'orange',fill:false}
+              ]},
+            options:{responsive:true,maintainAspectRatio:false,
+              plugins:{legend:{position:'top'}},
+              scales:{y:{beginAtZero:true,title:{display:true,text:'Total Number of Tests'}},
+                      x:{title:{display:true,text:'Build Number'}}}}});
+          </script>
+          <hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
@@ -258,11 +270,14 @@ jobs:
           TEST_STATUS=${{ needs.test.outputs.test_outcome }}
 
           if [[ "$TEST_STATUS" == "FAIL" ]]; then
-            STATUS_ICON="❌"; STATUS_TEXT="Failed (setup/config error)"
+            STATUS_ICON="❌"
+            STATUS_TEXT="Failed (setup/config error)"
           elif [[ "$TEST_STATUS" == "UNSTABLE" ]]; then
-            STATUS_ICON="⚠️"; STATUS_TEXT="Unstable (some tests failed)"
+            STATUS_ICON="⚠️"
+            STATUS_TEXT="Unstable (some tests failed)"
           else
-            STATUS_ICON="✅"; STATUS_TEXT="All tests passed"
+            STATUS_ICON="✅"
+            STATUS_TEXT="All tests passed"
           fi
 
           echo "### 🤖 Hyperscale SSD Framework CI/CD" >> $GITHUB_STEP_SUMMARY
