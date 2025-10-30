@@ -22,11 +22,16 @@ jobs:
           python-version: "3.10"
 
       - name: Install dependencies
+        shell: bash
         run: |
+          set +e
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           if [[ "${{ runner.os }}" == "Linux" ]]; then
-            sudo apt-get update && sudo apt-get install -y jq
+            sudo apt-get update
+            sudo apt-get install -y jq
+          else
+            choco install jq -y || true
           fi
           
       - name: Run Behave Tests
