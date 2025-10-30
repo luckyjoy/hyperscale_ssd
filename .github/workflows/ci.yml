@@ -46,12 +46,10 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
+          set +e
           python -m pip install --upgrade pip
-          pip install -r requirements.txt behave-html-pretty-formatter
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            sudo apt-get update
-            sudo apt-get install -y jq
-          else
+          pip install -r requirements.txt behave-html-pretty-formatter jq
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
             choco install jq -y || true
           fi
 
@@ -59,7 +57,7 @@ jobs:
         id: run_behave_tests
         shell: bash
         run: |
-          set -e
+          set -euo pipefail || true
           OS_NAME=${{ matrix.os }}
           BUILD_NUMBER=${{ github.run_number }}
           REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
@@ -69,11 +67,10 @@ jobs:
           behave --tags=@adv --exclude "features/manual_tests" \
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_DIR/validation_report.html" --no-capture | tee /tmp/behave_output.txt || true
-          TEST_EXIT_CODE=${PIPESTATUS[0]:-0}
 
-          # Determine result
+          TEST_EXIT_CODE=${PIPESTATUS[0]:-0} || true
           if [ "$TEST_EXIT_CODE" -ne 0 ]; then
-            if grep -qi "failed" /tmp/behave_output.txt; then
+            if grep -q "failed" /tmp/behave_output.txt 2>/dev/null; then
               RESULT=UNSTABLE
             else
               RESULT=FAIL
@@ -81,21 +78,21 @@ jobs:
           else
             RESULT=PASS
           fi
-          echo "Detected result: $RESULT"
+
           echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
           echo "$RESULT" > "$REPORT_DIR/status.txt"
           echo "$(TZ='America/Los_Angeles' date)" > "$REPORT_DIR/timestamp.txt"
 
-          # Parse summary counts
-          SUMMARY_LINE=$(grep -E 'scenarios?(\.|:)' /tmp/behave_output.txt | tail -n 1 || echo "")
-          PASSED_COUNT=$(grep -Po '\d+(?= scenarios? passed)' <<< "$SUMMARY_LINE" || echo 0)
-          FAILED_COUNT=$(grep -Po '\d+(?= failed)' <<< "$SUMMARY_LINE" || echo 0)
+          # Parse Behave summary line
+          SUMMARY_LINE=$(grep -E 'scenarios? ' /tmp/behave_output.txt | tail -n 1 || true)
+          PASSED_COUNT=$(echo "$SUMMARY_LINE" | grep -Eo '[0-9]+ passed' | grep -Eo '[0-9]+' || echo 0)
+          FAILED_COUNT=$(echo "$SUMMARY_LINE" | grep -Eo '[0-9]+ failed' | grep -Eo '[0-9]+' || echo 0)
           BROKEN_COUNT=$([ "$RESULT" = "UNSTABLE" ] && echo 1 || echo 0)
 
-          jq -n --argjson p "${PASSED_COUNT:-0}" --argjson f "${FAILED_COUNT:-0}" --argjson b "${BROKEN_COUNT:-0}" \
-            '{statistic: {passed: $p, failed: $f, broken: $b}}' > "$REPORT_DIR/summary.json"
+          jq -n --argjson p "$PASSED_COUNT" --argjson f "$FAILED_COUNT" --argjson b "$BROKEN_COUNT" \
+            '{statistic:{passed:$p,failed:$f,broken:$b}}' > "$REPORT_DIR/summary.json"
 
-          echo "Wrote $REPORT_DIR/summary.json:"
+          echo "Summary JSON for $OS_NAME:"
           cat "$REPORT_DIR/summary.json"
 
       - uses: actions/upload-artifact@v4
@@ -115,219 +112,129 @@ jobs:
       - name: Install JQ
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Get workflow filename
-        id: get_workflow_name
-        run: echo "WORKFLOW_FILE=$(basename .github/workflows/*.yml)" >> $GITHUB_ENV
-
-      - name: Download previous history artifact (if any)
-        uses: dawidd6/action-download-artifact@v6
+      - name: Download previous history
+        uses: actions/download-artifact@v4
         with:
-          workflow: ${{ env.WORKFLOW_FILE }}
-          branch: main
           name: history
           path: previous-site
-          if_no_artifact_found: ignore
+          if-no-artifact-found: ignore
 
-      - name: Restore full history (cross-platform safe)
+      - name: Restore previous builds (cross-platform safe)
         shell: bash
         run: |
-          set -e
           SITE_DIR="${{ env.SITE_DIR }}"
           mkdir -p "$SITE_DIR"
-
           if [ -d "previous-site" ]; then
-            echo "♻️ Restoring previous-site content..."
-            for D in previous-site/*; do
-              [ -e "$D" ] || continue
-              BASE=$(basename "$D")
-              mkdir -p "$SITE_DIR/$BASE"
-              cp -R "$D/"* "$SITE_DIR/$BASE/" 2>/dev/null || true
-            done
-          else
-            echo "No previous-site artifact found."
+            echo "Merging previous-site into $SITE_DIR..."
+            cp -R previous-site/* "$SITE_DIR/" || true
           fi
 
-      - name: Download Test Results
+      - name: Download current test results
         uses: actions/download-artifact@v4
         with:
           path: reports
 
-      - name: Generate Reports & Sync Latest
+      - name: Integrate new reports
         shell: bash
         run: |
-          set -e
+          set -euo pipefail || true
           SITE_DIR="site"
           BUILD_NUMBER=${{ github.run_number }}
           mkdir -p "$SITE_DIR/latest"
 
           for OS in ubuntu-latest windows-latest; do
-            REPORT_DIR_BUILD="$SITE_DIR/$BUILD_NUMBER/$OS"
-            REPORT_DIR_LATEST="$SITE_DIR/latest/$OS"
-            mkdir -p "$REPORT_DIR_BUILD" "$REPORT_DIR_LATEST"
+            SRC_DIR="reports/build-$OS"
+            DEST_BUILD="$SITE_DIR/$BUILD_NUMBER/$OS"
+            DEST_LATEST="$SITE_DIR/latest/$OS"
 
-            if compgen -G "reports/build-$OS/*" > /dev/null; then
-              cp -R reports/build-$OS/* "$REPORT_DIR_BUILD/" || true
+            mkdir -p "$DEST_BUILD" "$DEST_LATEST"
+            cp -R "$SRC_DIR/"* "$DEST_BUILD/" || true
+
+            if [ -f "$DEST_BUILD/validation_report.html" ]; then
+              cp "$DEST_BUILD/validation_report.html" "$DEST_LATEST/index.html"
             fi
 
-            if [ -f "$REPORT_DIR_BUILD/validation_report.html" ]; then
-              cp "$REPORT_DIR_BUILD/validation_report.html" "$REPORT_DIR_LATEST/index.html"
-            fi
-
-            if [ -f "$REPORT_DIR_BUILD/summary.json" ]; then
-              cp "$REPORT_DIR_BUILD/summary.json" "$REPORT_DIR_LATEST/summary.json"
+            if [ -f "$DEST_BUILD/summary.json" ]; then
+              cp "$DEST_BUILD/summary.json" "$DEST_LATEST/summary.json"
             else
-              jq -n '{statistic:{passed:0,failed:0,broken:0}}' > "$REPORT_DIR_BUILD/summary.json"
-              cp "$REPORT_DIR_BUILD/summary.json" "$REPORT_DIR_LATEST/summary.json"
+              jq -n '{statistic:{passed:0,failed:0,broken:0}}' > "$DEST_BUILD/summary.json"
+              cp "$DEST_BUILD/summary.json" "$DEST_LATEST/summary.json"
             fi
 
-            cp -R "$REPORT_DIR_BUILD/"* "$REPORT_DIR_LATEST/" || true
+            date -u > "$DEST_BUILD/build-info.txt"
+            date -u > "$DEST_LATEST/build-info.txt"
 
             REPO_NAME="${GITHUB_REPOSITORY##*/}"
-            echo "{\"name\":\"$OS\",\"type\":\"GitHub Actions\",\"url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\",\"reportUrl\":\"https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/latest/$OS/\",\"buildOrder\":\"${BUILD_NUMBER}\",\"buildName\":\"Build ${BUILD_NUMBER} ($OS)\",\"buildUrl\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" > "$REPORT_DIR_LATEST/executor.json"
-
-            date -u > "$REPORT_DIR_BUILD/build-info.txt"
-            date -u > "$REPORT_DIR_LATEST/build-info.txt"
+            echo "{\"name\":\"$OS\",\"type\":\"GitHub Actions\",\"url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\",\"reportUrl\":\"https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/latest/$OS/\",\"buildOrder\":\"${BUILD_NUMBER}\",\"buildName\":\"Build ${BUILD_NUMBER} ($OS)\",\"buildUrl\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" > "$DEST_LATEST/executor.json"
           done
 
-      - name: Rebuild Dashboard with Trend Charts
+      - name: Generate Build History Dashboard
         shell: bash
         run: |
-          set -e
+          set -euo pipefail || true
           SITE_DIR="site"
-          CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
+          CURRENT_TIME=$(TZ='America/Los_Angeles' date)
 
-          # Ensure index.html is not a directory
-          if [ -d "$SITE_DIR/index.html" ]; then
-            echo "⚠️  Found a directory named 'index.html', removing..."
-            rm -rf "$SITE_DIR/index.html"
-          fi
-          mkdir -p "$SITE_DIR"
+          # Start index.html
+          echo "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Build History</title>
+          <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+          <style>body{font-family:sans-serif;margin:20px;}a{color:#0366d6;text-decoration:none;}a:hover{text-decoration:underline;}#chart-container{max-width:900px;max-height:500px;}</style>
+          </head><body><h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>" > "$SITE_DIR/index.html"
 
-          # Now safely write the dashboard HTML
-          {
-            echo "<html><head><title>Reports History</title>"
-            echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
-            echo "<style>
-              body{font-family:sans-serif;margin:20px;}
-              ul{list-style:none;padding:0;}
-              li{margin:6px 0;}
-              a{text-decoration:none;color:#0366d6;}
-              a:hover{text-decoration:underline;}
-              #chart-container{max-width:800px;max-height:400px;margin:0;}
-            </style></head><body>"
-            echo "<h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>"
-            echo "<h2>🧩 Latest Reports</h2><hr><ul>"
-          } > "$SITE_DIR/index.html"
-
-          # List latest reports
+          echo "<h2>🧩 Latest Reports</h2><ul>" >> "$SITE_DIR/index.html"
           for OS in ubuntu-latest windows-latest; do
             if [ -d "$SITE_DIR/latest/$OS" ]; then
-              TS_UTC=$(cat "$SITE_DIR/latest/$OS/build-info.txt" 2>/dev/null || echo "")
-              TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "$TS_UTC")
-              echo "<li><strong><a href='latest/$OS/'>Latest Report ($OS)</a></strong> - Last run: $TS_DISPLAY</li>" >> "$SITE_DIR/index.html"
-            else
-              echo "<li><strong>$OS:</strong> (No report found)</li>" >> "$SITE_DIR/index.html"
+              echo "<li><a href='latest/$OS/'>Latest Report ($OS)</a></li>" >> "$SITE_DIR/index.html"
             fi
           done
-
           echo "</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2><ul>" >> "$SITE_DIR/index.html"
 
-          # Collect all build directories (numeric)
-          BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr || true)
-          CHART_BUILDS=$(echo "$BUILDS" | sort -n)
+          BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -regex '.*/[0-9]+' | sort -nr)
+          LABELS=""; PASS=""; FAIL=""; UNSTABLE=""
 
-          LABELS=""
-          PASS_COUNTS=""
-          FAIL_COUNTS=""
-          UNSTABLE_COUNTS=""
+          for BUILD in $BUILDS; do
+            BUILD_NUM=$(basename "$BUILD")
+            echo "<li><a href='${BUILD_NUM}/ubuntu-latest/'>Build #$BUILD_NUM</a></li>" >> "$SITE_DIR/index.html"
 
-          for BUILD in $CHART_BUILDS; do
-            TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || cat "$SITE_DIR/$BUILD/windows-latest/build-info.txt" 2>/dev/null || echo "")
-            TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
-            echo "<li><strong>Build #${BUILD}</strong> (Run: $TS_DISPLAY) - <a href='${BUILD}/ubuntu-latest/'>Ubuntu</a> / <a href='${BUILD}/windows-latest/'>Windows</a></li>" >> "$SITE_DIR/index.html"
-
-            TOTAL_PASS=0
-            TOTAL_FAIL=0
-            TOTAL_UNSTABLE=0
+            P=0; F=0; B=0
             for OS in ubuntu-latest windows-latest; do
-              SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json"
-              if [ -f "$SUMMARY_FILE" ]; then
-                PASS=$(jq -r '.statistic.passed // 0' "$SUMMARY_FILE" 2>/dev/null || echo 0)
-                FAIL=$(jq -r '.statistic.failed // 0' "$SUMMARY_FILE" 2>/dev/null || echo 0)
-                BROKEN=$(jq -r '.statistic.broken // 0' "$SUMMARY_FILE" 2>/dev/null || echo 0)
-                TOTAL_PASS=$((TOTAL_PASS + PASS))
-                TOTAL_FAIL=$((TOTAL_FAIL + FAIL))
-                TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + BROKEN))
+              SUMMARY="$SITE_DIR/$BUILD_NUM/$OS/summary.json"
+              if [ -f "$SUMMARY" ]; then
+                p=$(jq -r '.statistic.passed // 0' "$SUMMARY")
+                f=$(jq -r '.statistic.failed // 0' "$SUMMARY")
+                b=$(jq -r '.statistic.broken // 0' "$SUMMARY")
+                P=$((P + p)); F=$((F + f)); B=$((B + b))
               fi
             done
-            LABELS="$LABELS'$BUILD',"
-            PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
-            FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
-            UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
+
+            LABELS="$LABELS'$BUILD_NUM',"
+            PASS="$PASS$P,"
+            FAIL="$FAIL$F,"
+            UNSTABLE="$UNSTABLE$B,"
           done
 
-          echo "</ul>
-          <div id='chart-container'><canvas id='trendChart'></canvas></div>
+          echo "</ul><div id='chart-container'><canvas id='trendChart'></canvas></div>
           <script>
-            const ctx = document.getElementById('trendChart').getContext('2d');
-            new Chart(ctx, {
-              type: 'line',
-              data: {
-                labels: [${LABELS%,}],
-                datasets: [
-                  {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', fill: false},
-                  {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', fill: false},
-                  {label: 'UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
-                ]
-              },
-              options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { position: 'top' } },
-                scales: {
-                  y: { beginAtZero: true, title: { display: true, text: 'Number of Tests' } },
-                  x: { title: { display: true, text: 'Build Number' } }
-                }
-              }
-            });
-          </script>
-          <hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
+          const ctx=document.getElementById('trendChart').getContext('2d');
+          new Chart(ctx,{type:'line',data:{labels:[${LABELS%,}],
+          datasets:[{label:'PASS',data:[${PASS%,}],borderColor:'green',fill:false},
+          {label:'FAIL',data:[${FAIL%,}],borderColor:'red',fill:false},
+          {label:'UNSTABLE',data:[${UNSTABLE%,}],borderColor:'orange',fill:false}]},
+          options:{responsive:true,scales:{y:{beginAtZero:true}}}});
+          </script><hr><p><em>Generated automatically on $CURRENT_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ${{ env.SITE_DIR }}
+          path: site
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Upload History Artifact
+      - name: Upload History for next run
         uses: actions/upload-artifact@v4
         with:
           name: history
-          path: ${{ env.SITE_DIR }}
+          path: site
           retention-days: 7
-
-      - name: Add Workflow Summary (Badges)
-        run: |
-          PAGE_URL=${{ steps.deployment.outputs.page_url }}
-          BASE_URL="${PAGE_URL%/}"
-          TEST_STATUS=${{ needs.test.outputs.test_outcome }}
-
-          if [[ "$TEST_STATUS" == "FAIL" ]]; then
-            STATUS_ICON="❌"
-            STATUS_TEXT="Failed (setup/config error)"
-          elif [[ "$TEST_STATUS" == "UNSTABLE" ]]; then
-            STATUS_ICON="⚠️"
-            STATUS_TEXT="Unstable (some tests failed)"
-          else
-            STATUS_ICON="✅"
-            STATUS_TEXT="All tests passed"
-          fi
-
-          echo "### 🤖 Hyperscale SSD Framework CI/CD" >> $GITHUB_STEP_SUMMARY
-          echo "[![Ubuntu Report](https://img.shields.io/badge/Ubuntu-Latest_Build-blue)](${BASE_URL}/latest/ubuntu-latest/index.html)" >> $GITHUB_STEP_SUMMARY
-          echo "[![Windows Report](https://img.shields.io/badge/Windows-Latest_Build-blue)](${BASE_URL}/latest/windows-latest/index.html)" >> $GITHUB_STEP_SUMMARY
-          echo "[![Report History](https://img.shields.io/badge/All_Builds-green)](${BASE_URL}/)" >> $GITHUB_STEP_SUMMARY
-          echo "Build #${{ github.run_number }} | Status: $STATUS_ICON $STATUS_TEXT" >> $GITHUB_STEP_SUMMARY
