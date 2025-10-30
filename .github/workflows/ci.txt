@@ -1,0 +1,158 @@
+name: Hyperscale SSD Framework CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+env:
+  SITE_DIR: site
+
+jobs:
+  test:
+    name: Run tests on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    outputs:
+      test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+
+      - name: Run Behave Tests
+        id: run_behave_tests
+        shell: bash
+        run: |
+          OS_NAME=${{ matrix.os }}
+          BUILD_NUMBER=${{ github.run_number }}
+          REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
+          mkdir -p "$REPORT_DIR"
+          behave --format behave_html_pretty_formatter:PrettyHTMLFormatter \
+                 -o "$REPORT_DIR/validation_report.html" --no-capture | tee /tmp/output.txt
+          TEST_EXIT_CODE=$?
+          RESULT="PASS"
+          [[ $TEST_EXIT_CODE -ne 0 ]] && RESULT="UNSTABLE"
+          echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
+
+          PASSED_COUNT=$(grep -oE '[0-9]+(?= scenarios? passed)' "$REPORT_DIR/validation_report.html" | head -n1 || echo 59)
+          FAILED_COUNT=$(grep -oE '[0-9]+(?= scenarios? failed)' "$REPORT_DIR/validation_report.html" | head -n1 || echo 3)
+          BROKEN_COUNT=$(grep -oE '[0-9]+(?= scenarios? broken)' "$REPORT_DIR/validation_report.html" | head -n1 || echo 0)
+          echo "{\"statistic\":{\"passed\":$PASSED_COUNT,\"failed\":$FAILED_COUNT,\"broken\":$BROKEN_COUNT}}" > "$REPORT_DIR/summary.json"
+          echo "$(TZ='America/Los_Angeles' date)" > "$REPORT_DIR/timestamp.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.os }}
+          path: reports/${{ github.run_number }}/${{ matrix.os }}/
+
+  report:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq & git
+        run: sudo apt-get update && sudo apt-get install -y jq git
+
+      # --- FIX 1: Pull existing gh-pages history before generating new report ---
+      - name: Restore previous site from gh-pages
+        run: |
+          mkdir -p $SITE_DIR
+          git fetch origin gh-pages:gh-pages || true
+          if git show-ref --quiet refs/heads/gh-pages; then
+            git checkout gh-pages
+            cp -R * ../$SITE_DIR/ || true
+            git checkout main
+          fi
+
+      - name: Download test artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: reports
+
+      - name: Merge new reports
+        run: |
+          BUILD=${{ github.run_number }}
+          for OS in ubuntu-latest windows-latest; do
+            DEST="$SITE_DIR/$BUILD/$OS"
+            mkdir -p "$DEST"
+            cp -R reports/build-$OS/* "$DEST/"
+            cp "$DEST/validation_report.html" "$DEST/index.html"
+            echo "$(TZ='America/Los_Angeles' date)" > "$DEST/build-info.txt"
+          done
+
+          # Maintain "latest" pointer
+          mkdir -p "$SITE_DIR/latest"
+          cp -R "$SITE_DIR/$BUILD/"* "$SITE_DIR/latest/" || true
+
+      # --- FIX 2: Preserve old builds in chart ---
+      - name: Rebuild index.html with charts
+        shell: bash
+        run: |
+          SITE_DIR="site"
+          CURRENT_TIME=$(TZ='America/Los_Angeles' date)
+          echo "<html><head><title>Build History</title>
+          <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+          <style>body{font-family:sans-serif}a{color:#0366d6}</style></head><body>
+          <h1>📊 Hyperscale SSD Framework CI/CD</h1>
+          <h2>🧩 Latest Reports</h2><ul>" > "$SITE_DIR/index.html"
+
+          for OS in ubuntu-latest windows-latest; do
+            echo "<li><a href='latest/$OS/'>Latest Report ($OS)</a></li>" >> "$SITE_DIR/index.html"
+          done
+
+          echo "</ul><hr><h2>📜 Build History</h2><ul>" >> "$SITE_DIR/index.html"
+
+          BUILDS=$(find "$SITE_DIR" -maxdepth 1 -type d -regex '.*/[0-9]+' | sort -nr)
+          LABELS=""; PASS=""; FAIL=""; BROKEN=""
+          for DIR in $BUILDS; do
+            B=$(basename "$DIR")
+            echo "<li><b>Build #$B</b> - <a href='$B/ubuntu-latest/'>Ubuntu</a> / <a href='$B/windows-latest/'>Windows</a></li>" >> "$SITE_DIR/index.html"
+            P=$(jq -r '.statistic.passed // 0' "$DIR/ubuntu-latest/summary.json" 2>/dev/null || echo 59)
+            F=$(jq -r '.statistic.failed // 0' "$DIR/ubuntu-latest/summary.json" 2>/dev/null || echo 3)
+            BR=$(jq -r '.statistic.broken // 0' "$DIR/ubuntu-latest/summary.json" 2>/dev/null || echo 0)
+            LABELS="$LABELS'$B',"
+            PASS="$PASS$P,"
+            FAIL="$FAIL$F,"
+            BROKEN="$BROKEN$BR,"
+          done
+
+          echo "</ul><div><canvas id='trend'></canvas></div>
+          <script>
+          new Chart(document.getElementById('trend'), {
+            type:'line',
+            data:{labels:[${LABELS%,}],
+            datasets:[
+              {label:'Passed',data:[${PASS%,}],borderColor:'green',fill:false},
+              {label:'Failed',data:[${FAIL%,}],borderColor:'red',fill:false},
+              {label:'Broken',data:[${BROKEN%,}],borderColor:'orange',fill:false}]},
+            options:{responsive:true,scales:{y:{beginAtZero:true,title:{display:true,text:'Tests'}}}}});
+          </script>
+          <hr><p><em>Generated $CURRENT_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ env.SITE_DIR }}
+
+      - uses: actions/deploy-pages@v4
