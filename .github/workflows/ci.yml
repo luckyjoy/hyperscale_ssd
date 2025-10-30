@@ -112,17 +112,17 @@ jobs:
 
             SUMMARY_JSON="site/history/summary.json"
 
-            # ensure current summary is valid JSON
-            CURRENT_SUMMARY=$(cat current/summary.json | jq .)
+            # Ensure current summary is valid JSON
+            if [[ ! -f current/summary.json ]]; then
+              echo "{}" > current/summary.json
+            fi
 
             if [[ -f "$SUMMARY_JSON" ]]; then
-              # read existing summary as array
-              EXISTING=$(jq . "$SUMMARY_JSON")
-              # append new build
-              echo "$EXISTING + [{\"build\":\"$BUILD_ID\",\"data\":$CURRENT_SUMMARY}]" | jq . > "$SUMMARY_JSON"
+              # Append new build safely
+              jq --slurpfile new current/summary.json '. + [{"build":"'"$BUILD_ID"'","data":$new[0]}]' "$SUMMARY_JSON" > site/history/tmp.json
+              mv site/history/tmp.json "$SUMMARY_JSON"
             else
-              # create new summary.json
-              echo "[{\"build\":\"$BUILD_ID\",\"data\":$CURRENT_SUMMARY}]" | jq . > "$SUMMARY_JSON"
+              jq --slurpfile new current/summary.json '[{"build":"'"$BUILD_ID"'","data":$new[0]}]' < /dev/null > "$SUMMARY_JSON"
             fi
 
             echo "✅ summary.json updated:"
