@@ -46,8 +46,9 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
+          set +e
           python -m pip install --upgrade pip
-          pip install -r requirements.txt behave-html-pretty-formatter
+          pip install -r requirements.txt
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             sudo apt-get update
             sudo apt-get install -y jq
@@ -59,7 +60,7 @@ jobs:
         id: run_behave_tests
         shell: bash
         run: |
-          set -e
+          set -euo pipefail || true
           OS_NAME=${{ matrix.os }}
           BUILD_NUMBER=${{ github.run_number }}
           REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
@@ -69,11 +70,10 @@ jobs:
           behave --tags=@adv --exclude "features/manual_tests" \
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_DIR/validation_report.html" --no-capture | tee /tmp/behave_output.txt || true
-          TEST_EXIT_CODE=${PIPESTATUS[0]:-0}
+          TEST_EXIT_CODE=${PIPESTATUS[0]:-0} || true
 
-          # Determine result
           if [ "$TEST_EXIT_CODE" -ne 0 ]; then
-            if grep -qi "failed" /tmp/behave_output.txt; then
+            if grep -q "failed" /tmp/behave_output.txt 2>/dev/null; then
               RESULT=UNSTABLE
             else
               RESULT=FAIL
@@ -81,18 +81,30 @@ jobs:
           else
             RESULT=PASS
           fi
+
           echo "Detected result: $RESULT"
           echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
           echo "$RESULT" > "$REPORT_DIR/status.txt"
           echo "$(TZ='America/Los_Angeles' date)" > "$REPORT_DIR/timestamp.txt"
 
-          # Parse summary counts
-          SUMMARY_LINE=$(grep -E 'scenarios?(\.|:)' /tmp/behave_output.txt | tail -n 1 || echo "")
-          PASSED_COUNT=$(grep -Po '\d+(?= scenarios? passed)' <<< "$SUMMARY_LINE" || echo 0)
-          FAILED_COUNT=$(grep -Po '\d+(?= failed)' <<< "$SUMMARY_LINE" || echo 0)
+          # Extract scenario counts (defensive)
+          SUMMARY_LINE=$(grep -E 'scenarios?(\.|:)' /tmp/behave_output.txt | tail -n 1 || true)
+          echo "Behave summary line: '$SUMMARY_LINE'"
+
+          PASSED_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*([0-9]+) scenarios? passed.*/\1/' 2>/dev/null | grep -o '^[0-9]\+$' || echo 0)
+          FAILED_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*, ([0-9]+) failed.*/\1/' 2>/dev/null | grep -o '^[0-9]\+$' || echo 0)
+          # If behave printed "0 failed" pattern different, try fallback: parse numbers from string
+          if ! echo "$PASSED_COUNT" | grep -q '^[0-9]\+$'; then
+            PASSED_COUNT=0
+          fi
+          if ! echo "$FAILED_COUNT" | grep -q '^[0-9]\+$'; then
+            FAILED_COUNT=0
+          fi
+
           BROKEN_COUNT=$([ "$RESULT" = "UNSTABLE" ] && echo 1 || echo 0)
 
-          jq -n --argjson p "${PASSED_COUNT:-0}" --argjson f "${FAILED_COUNT:-0}" --argjson b "${BROKEN_COUNT:-0}" \
+          # write summary.json (force numeric types)
+          jq -n --argjson p "$PASSED_COUNT" --argjson f "$FAILED_COUNT" --argjson b "$BROKEN_COUNT" \
             '{statistic: {passed: $p, failed: $f, broken: $b}}' > "$REPORT_DIR/summary.json"
 
           echo "Wrote $REPORT_DIR/summary.json:"
@@ -128,21 +140,33 @@ jobs:
           path: previous-site
           if_no_artifact_found: ignore
 
-      - name: Restore full history (cross-platform safe)
+      - name: Restore full history (robust)
         shell: bash
         run: |
-          set -e
+          set -euo pipefail || true
           SITE_DIR="${{ env.SITE_DIR }}"
           mkdir -p "$SITE_DIR"
-
           if [ -d "previous-site" ]; then
-            echo "♻️ Restoring previous-site content..."
+            echo "♻️ previous-site contents:"
+            find previous-site -maxdepth 2 -printf "  %p\n" || true
+
+            # Move numeric build dirs into site root explicitly
             for D in previous-site/*; do
               [ -e "$D" ] || continue
               BASE=$(basename "$D")
-              mkdir -p "$SITE_DIR/$BASE"
-              cp -R "$D/"* "$SITE_DIR/$BASE/" 2>/dev/null || true
+              if [[ "$BASE" =~ ^[0-9]+$ ]]; then
+                echo "Merging previous build folder: $BASE"
+                mkdir -p "$SITE_DIR/$BASE"
+                rsync -a "$D/" "$SITE_DIR/$BASE/" || true
+              else
+                # non-numeric top-level (e.g. latest or other files) -> merge into site/
+                echo "Merging non-build folder: $BASE"
+                rsync -a "$D/" "$SITE_DIR/" || true
+              fi
             done
+
+            echo "After restore, site top-level folders:"
+            find "$SITE_DIR" -maxdepth 2 -printf "  %p\n" || true
           else
             echo "No previous-site artifact found."
           fi
@@ -152,10 +176,10 @@ jobs:
         with:
           path: reports
 
-      - name: Generate Reports & Sync Latest
+      - name: Generate Reports Per OS (robust copy + diagnostics)
         shell: bash
         run: |
-          set -e
+          set -euo pipefail || true
           SITE_DIR="site"
           BUILD_NUMBER=${{ github.run_number }}
           mkdir -p "$SITE_DIR/latest"
@@ -165,21 +189,42 @@ jobs:
             REPORT_DIR_LATEST="$SITE_DIR/latest/$OS"
             mkdir -p "$REPORT_DIR_BUILD" "$REPORT_DIR_LATEST"
 
+            echo "----- Processing artifacts for $OS into $REPORT_DIR_BUILD and $REPORT_DIR_LATEST"
+
             if compgen -G "reports/build-$OS/*" > /dev/null; then
+              echo "Copying reports/build-$OS/* -> $REPORT_DIR_BUILD/"
               cp -R reports/build-$OS/* "$REPORT_DIR_BUILD/" || true
+            else
+              echo "WARNING: no artifacts found at reports/build-$OS/ (maybe build artifact failed to upload)"
             fi
 
+            # If validation_report.html exists, copy it as index.html for Pages
             if [ -f "$REPORT_DIR_BUILD/validation_report.html" ]; then
+              echo "Copying validation_report.html -> latest index.html"
               cp "$REPORT_DIR_BUILD/validation_report.html" "$REPORT_DIR_LATEST/index.html"
+            else
+              echo "No validation_report.html in $REPORT_DIR_BUILD (will not create latest index.html from it)"
             fi
 
+            # Ensure summary.json exists -- if not, try to find a summary.json anywhere inside the build dir
             if [ -f "$REPORT_DIR_BUILD/summary.json" ]; then
               cp "$REPORT_DIR_BUILD/summary.json" "$REPORT_DIR_LATEST/summary.json"
             else
-              jq -n '{statistic:{passed:0,failed:0,broken:0}}' > "$REPORT_DIR_BUILD/summary.json"
-              cp "$REPORT_DIR_BUILD/summary.json" "$REPORT_DIR_LATEST/summary.json"
+              echo "summary.json not found at $REPORT_DIR_BUILD/summary.json. Searching..."
+              FOUND=$(find "$REPORT_DIR_BUILD" -type f -iname 'summary.json' -print -quit || true)
+              if [ -n "$FOUND" ]; then
+                echo "Found summary.json at $FOUND - copying to latest"
+                cp "$FOUND" "$REPORT_DIR_LATEST/summary.json"
+                cp "$FOUND" "$REPORT_DIR_BUILD/summary.json"
+              else
+                echo "WARNING: summary.json missing for build $BUILD_NUMBER $OS"
+                # create a default summary.json so chart code sees numeric zeros rather than failing
+                jq -n '{statistic:{passed:0,failed:0,broken:0}}' > "$REPORT_DIR_BUILD/summary.json"
+                cp "$REPORT_DIR_BUILD/summary.json" "$REPORT_DIR_LATEST/summary.json"
+              fi
             fi
 
+            # Copy everything to latest (again) to ensure pages pickup
             cp -R "$REPORT_DIR_BUILD/"* "$REPORT_DIR_LATEST/" || true
 
             REPO_NAME="${GITHUB_REPOSITORY##*/}"
@@ -189,22 +234,22 @@ jobs:
             date -u > "$REPORT_DIR_LATEST/build-info.txt"
           done
 
-      - name: Rebuild Dashboard with Trend Charts
+      - name: Rebuild index.html with Trend Charts (with diagnostics)
         shell: bash
         run: |
-          set -e
+          set -euo pipefail || true
           SITE_DIR="site"
           CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
-
+          mkdir -p "$SITE_DIR"
           echo "<html><head><title>Reports History</title>
           <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
           <style>
-            body{font-family:sans-serif;margin:20px;}
-            ul{list-style:none;padding:0;}
-            li{margin:6px 0;}
-            a{text-decoration:none;color:#0366d6;}
-            a:hover{text-decoration:underline;}
-            #chart-container{max-width:800px;max-height:400px;margin:0;}
+          body{font-family:sans-serif;margin:20px;}
+          ul{list-style:none;padding:0;}
+          li{margin:6px 0;}
+          a{text-decoration:none;color:#0366d6;}
+          a:hover{text-decoration:underline;}
+          #chart-container {max-width:800px;max-height:400px;margin:0;}
           </style></head><body>
           <h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>
           <h2>🧩 Latest Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
@@ -218,18 +263,20 @@ jobs:
               echo "<li><strong>$OS:</strong> (No report found)</li>" >> "$SITE_DIR/index.html"
             fi
           done
-
           echo "</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2><ul>" >> "$SITE_DIR/index.html"
 
+          # list all numeric build dirs (after restore)
           BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr || true)
-          CHART_BUILDS=$(echo "$BUILDS" | sort -n)
+          echo "Detected build folders: $BUILDS" 1>&2
 
+          CHART_BUILDS=$(echo "$BUILDS" | sort -n)
           LABELS=""
           PASS_COUNTS=""
           FAIL_COUNTS=""
           UNSTABLE_COUNTS=""
 
           for BUILD in $CHART_BUILDS; do
+            echo "Processing build $BUILD" 1>&2
             TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || cat "$SITE_DIR/$BUILD/windows-latest/build-info.txt" 2>/dev/null || echo "")
             TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
             echo "<li><strong>Build #${BUILD}</strong> (Run: $TS_DISPLAY) - <a href='${BUILD}/ubuntu-latest/'>Ubuntu</a> / <a href='${BUILD}/windows-latest/'>Windows</a></li>" >> "$SITE_DIR/index.html"
@@ -241,12 +288,16 @@ jobs:
             for OS in ubuntu-latest windows-latest; do
               SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json"
               if [ -f "$SUMMARY_FILE" ]; then
-                PASS=$(jq -r '.statistic.passed // 0' "$SUMMARY_FILE" 2>/dev/null || echo 0)
-                FAIL=$(jq -r '.statistic.failed // 0' "$SUMMARY_FILE" 2>/dev/null || echo 0)
-                BROKEN=$(jq -r '.statistic.broken // 0' "$SUMMARY_FILE" 2>/dev/null || echo 0)
-                TOTAL_PASS=$((TOTAL_PASS + PASS))
-                TOTAL_FAIL=$((TOTAL_FAIL + FAIL))
-                TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + BROKEN))
+                echo "Reading $SUMMARY_FILE" 1>&2
+                PASS_COUNT=$(jq -r '.statistic.passed // 0 | tonumber' "$SUMMARY_FILE" 2>/dev/null || echo 0)
+                FAIL_COUNT=$(jq -r '.statistic.failed // 0 | tonumber' "$SUMMARY_FILE" 2>/dev/null || echo 0)
+                BROKEN_COUNT=$(jq -r '.statistic.broken // 0 | tonumber' "$SUMMARY_FILE" 2>/dev/null || echo 0)
+                echo " -> $OS: pass=$PASS_COUNT fail=$FAIL_COUNT broken=$BROKEN_COUNT" 1>&2
+                TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
+                TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
+                TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + BROKEN_COUNT))
+              else
+                echo "WARNING: missing $SUMMARY_FILE" 1>&2
               fi
             done
 
@@ -256,32 +307,32 @@ jobs:
             UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
           done
 
-          echo "</ul>
-          <div id='chart-container'><canvas id='trendChart'></canvas></div>
+          echo "</ul>" >> "$SITE_DIR/index.html"
+
+          echo "<div id='chart-container'><canvas id='trendChart'></canvas></div>
           <script>
-            const ctx = document.getElementById('trendChart').getContext('2d');
-            new Chart(ctx, {
-              type: 'line',
-              data: {
-                labels: [${LABELS%,}],
-                datasets: [
-                  {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', fill: false},
-                  {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', fill: false},
-                  {label: 'UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
-                ]
-              },
-              options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { position: 'top' } },
-                scales: {
-                  y: { beginAtZero: true, title: { display: true, text: 'Number of Tests' } },
-                  x: { title: { display: true, text: 'Build Number' } }
-                }
+          const ctx = document.getElementById('trendChart').getContext('2d');
+          new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: [${LABELS%,}],
+              datasets: [
+                {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', fill: false},
+                {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', fill: false},
+                {label: 'UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { position: 'top' } },
+              scales: {
+                y: { beginAtZero: true, stepSize: 1, min: 0, title: { display: true, text: 'Total Number of Tests' } },
+                x: { title: { display: true, text: 'Build Number' } }
               }
-            });
-          </script>
-          <hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
+            }
+          });
+          </script><hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
@@ -317,7 +368,9 @@ jobs:
           fi
 
           echo "### 🤖 Hyperscale SSD Framework CI/CD" >> $GITHUB_STEP_SUMMARY
-          echo "[![Ubuntu Report](https://img.shields.io/badge/Ubuntu-Latest_Build-blue)](${BASE_URL}/latest/ubuntu-latest/index.html)" >> $GITHUB_STEP_SUMMARY
-          echo "[![Windows Report](https://img.shields.io/badge/Windows-Latest_Build-blue)](${BASE_URL}/latest/windows-latest/index.html)" >> $GITHUB_STEP_SUMMARY
-          echo "[![Report History](https://img.shields.io/badge/All_Builds-green)](${BASE_URL}/)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[![Ubuntu Latest Report](https://img.shields.io/badge/Ubuntu-Latest_Build-blue)](${BASE_URL}/latest/ubuntu-latest/index.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Windows Latest Report](https://img.shields.io/badge/Windows-Latest_Build-blue)](${BASE_URL}/latest/windows-latest/index.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Report History](https://img.shields.io/badge/All-Builds-green)](${BASE_URL}/)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "Build #${{ github.run_number }} | Status: $STATUS_ICON $STATUS_TEXT" >> $GITHUB_STEP_SUMMARY

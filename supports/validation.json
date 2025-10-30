@@ -1,91 +1,92 @@
 {
-  "Title": "Hyperscale SSD Validation Plan",
-  "Version": "1.0",
-  "Date": "September 9, 2025",
-  "ProductName": "Hyperscale SSD",
-  "ProductModel": "XD7P Series",
-  "ProductManufacturer": "ABCDEF Inc.",
-  "ProductManager": "Role-based (confidential)",
+  "Title": "Robotics BDD Simulation Framework Validation Plan",
+  "Version": "1.2.0",
+  "Revised_Date": "2025-09-30",
+  "ProductName": "Robotics BDD Simulation Framework",
+  "ProductModel": "BDD-Sim-PyBullet",
+  "TargetSystemComponent": "Pioneer3DX Mobile Robot (Simulated)",
+  "TargetSystemVersion": "1.20.34",
+  "ProductManufacturer": "TBD",
   "QA_Manager": "TBD",
   "Validation_Engineer": "TBD",
-  "TargetEnvironment": "Hyperscale and Cloud Data Centers",
-  "Interface": "PCIe\u00ae 5.0, NVMe\u2122 2.0",
-  "FormFactor": "E1.S (EDSFF)",
+  "TargetEnvironment": "PyBullet and Gazebo Simulation Environments",
+  "TestFramework": "Gherkin (Feature files), Pytest (Step definitions), Allure HTML Report",
   "PlatformSupport": {
     "OperatingSystems": [
-      "Linux",
-      "Windows Server"
+      "Linux (Ubuntu 20.04+ Recommended)",
+      "Windows 10/11",
+      "macOS (Limited Support)"
     ],
-    "ServerArchitectures": [
+    "Architectures": [
       "x86-64 (Intel and AMD)",
-      "ARM"
+      "ARM64 (Simulation Host/Deployment Target)"
     ],
-    "CloudPlatforms": [
-      "Microsoft Azure",
-      "Google Cloud Platform",
-      "Amazon Web Services"
+    "VirtualizationAndContainerization": [
+      "Docker Containers (Recommended for consistency)",
+      "QEMU/KVM Virtual Machines"
     ]
   },
   "KeyFeatures": [
-    "High density and efficiency",
-    "Low and consistent latency",
-    "Optimized for thermal management",
-    "High performance for demanding workloads",
-    "Power loss protection"
+    "BDD-driven, human-readable acceptance criteria for robot behaviors.",
+    "Real-time state and physics validation checks within the simulation.",
+    "High-fidelity positional and sensor data testing.",
+    "Support for multiple simulation engines (PyBullet/Gazebo).",
+    "Automated regression reporting via Allure Test Report."
   ],
-  "Objective": "Validate Hyperscale SSD XD7P Series performance, reliability, and fault tolerance across hyperscale and cloud data center environments using automation-driven chaos and endurance workloads.",
+  "Objective": "To rigorously validate the BDD simulation framework's adherence to specified robot behaviors (Navigation, Safety, Sensing, Locomotion) within physics-based environments.",
   "Scope": {
     "InScope": [
-      "Performance under SPDK fio workloads",
-      "Multi-tenant mixed read/write workload testing",
-      "Fault injection: hot-unplug, power loss, latency spikes",
-      "SMART attribute monitoring",
-      "Firmware update resilience",
-      "End-to-end data integrity checks",
-      "CI/CD automation with Jenkins"
+      "Navigation: Movement in 3D, diagonal, zigzag, and circular paths.",
+      "Pick_and_Place: Object manipulation and blocked gripper scenarios.",
+      "Safety: Boundary constraints and single/multi-obstacle avoidance.",
+      "Sensing: Kalman filter convergence and object detection accuracy.",
+      "Locomotion: Walking and crouching state verification."
     ],
     "OutOfScope": [
-      "Legacy SATA/SAS SSD validation",
-      "Non-hyperscale environments",
-      "Custom hardware acceleration beyond PCIe 5.0"
+      "Performance tests (e.g., maximum CPU usage, loop timing) are not included in this scope.",
+      "Real-world hardware deployment or testing is outside the scope of the simulation framework validation.",
+      "Advanced AI/ML path planning algorithms beyond basic navigation commands."
     ]
   },
   "Challenges": [
-    "Endurance and longevity validation",
-    "Maintaining performance consistency and controlling latency spikes",
-    "Ensuring reliability and data integrity under power loss and hot-unplug",
-    "QoS fairness in multi-tenant environments"
+    "Ensuring simulation physics models (PyBullet) accurately reflect the Pioneer3DX dynamics.",
+    "Maintaining stable and consistent behavior across different simulation engine versions (PyBullet vs. Gazebo).",
+    "Handling race conditions during real-time state validation checks.",
+    "Integrating the framework seamlessly into CI/CD pipelines."
   ],
   "TestPurposes": [
-    "Validate SSD performance under realistic workloads",
-    "Simulate system-level faults (power loss, hot-unplug)",
-    "Inject latency spikes / I/O slowdowns",
-    "Verify workload recovery and resilience",
-    "Automate verification of IOPS, latency, and throughput thresholds",
-    "Integrate into Jenkins CI/CD pipelines for regression coverage"
+    "Ensure simulation physics models (PyBullet) accurately reflect the Pioneer3DX dynamics.",
+    "Verify the correct implementation of the robot's control logic against Gherkin specifications.",
+    "Automate the regression suite for every code commit.",
+    "Provide clear traceability from requirements (requirements.csv) to test results (Allure Report)."
   ],
   "FrameworkCapabilities": [
-    "Cross-platform support: Windows 11 + Linux hosts",
-    "QEMU VM orchestration for fault injection",
-    "nbdkit delay filters (Linux) / Python proxy (Windows) for latency",
-    "SPDK fio jobfiles with JSON output",
-    "Automatic pass/fail validation",
-    "CI/CD integration with Jenkins"
+    "Python 3.10+ Behave/Pytest-BDD framework execution.",
+    "Dynamic scenario execution using Scenario Outlines and data tables.",
+    "Simulation state management (resetting environment and robot position).",
+    "Real-time position and velocity validation checks."
   ],
   "Limitations": [
-    "QEMU QMP API differences across versions",
-    "Guest filesystem inconsistency after hot-removal \u2192 must use snapshots",
-    "Linux requires nbdkit delay filters; Windows requires Python proxy",
-    "Workload thresholds must be tuned per SSD type",
-    "SPDK fio JSON output mandatory for automated checks"
+    "Manual tests are required for subjective evaluation (e.g., visual smoothness, physics realism).",
+    "Performance tests (e.g., maximum CPU usage, loop timing) are not currently included in the BDD scope.",
+    "Requires a running PyBullet or Gazebo instance for execution."
   ],
-  "ValidationDurationDays": 3,
+  "ValidationDurationDays": 1,
   "RevisionHistory": [
     {
-      "Version": "1.0",
-      "Date": "September 10, 2025",
-      "Changes": "Initial validation plan created by combining product requirements with README framework details"
+      "Version": "1.0.0",
+      "Date": "2025-09-15",
+      "Changes": "Initial structure created for the Robotics BDD Simulation Framework Validation Plan."
+    },
+    {
+      "Version": "1.1.0",
+      "Date": "2025-09-20",
+      "Changes": "Updated product-specific fields: TargetRobotModel, FirmwareVersion, and confirmed Architectures for the robotics simulation environment."
+    },
+    {
+      "Version": "1.2.0",
+      "Date": "2025-09-30",
+      "Changes": "Refactored key names (e.g., TargetRobotModel -> TargetSystemComponent, FirmwareVersion -> TargetSystemVersion, Interface -> TestFramework) to align with the generic validation plan template."
     }
-  ],
-  "Copyright": "\u00a9 2025 Bang Thien Nguyen. All rights reserved."
+  ]
 }

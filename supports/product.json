@@ -1,37 +1,39 @@
 {
-  "Title": "Hyperscale SSD Product Requirements Document Summary",
-  "Version": "1.0",
-  "Date": "September 9, 2025",
-  "ProductName": "Hyperscale SSD",
-  "ProductModel": "XD7P Series",
-  "ProductVersion": "3.2",
-  "FirmwareVersion": "6.22.14, 6.26.0, 7.0.0",
-  "ProductManufacturer": "ABCDEF Inc.",
-  "ProductManager": "TBD, Role-based",
-  "TargetEnvironment": "Hyperscale and Cloud Data Centers",
-  "Interface": "PCIe® 5.0, NVMe™ 2.0",
-  "FormFactor": "E1.S (EDSFF)",
+  "Title": "Robotics BDD Simulation PRD",
+  "Version": "1.0.0",
+  "RevisedDate": "2025-09-30",
+  "ProductName": "Robotics BDD Simulation Framework",
+  "ProductModel": "BDD-Sim-PyBullet",
+  "ProductVersion": "1.0.0",
+  "FirmwareVersion": "Gazebo_Pioneer3DX (Robot Model)",
+  "ProductManufacturer": "Bang Thien Nguyen",
+  "ProductManager": "Bang Thien Nguyen",
+  "TargetEnvironment": "Robotics Simulation and Verification",
+  "Interface": "Gherkin/Behave (BDD Language), Python 3.10+",
+  "FormFactor": "Software Framework/Library",
   "PlatformSupport": {
     "OperatingSystems": [
-      "Linux",
-      "Windows Server"
+      "Windows 2025",
+      "Linux (Typical ROS/Simulation Environments)",
+      "macOS"
     ],
-    "ServerArchitectures": [
-      "x86-64 (Intel and AMD)",
-      "ARM"
+    "SimulationEngine": [
+      "PyBullet (Physics Engine)",
+      "Gazebo (Robot Model Interface)"
     ],
-    "CloudPlatforms": [
-      "Microsoft Azure",
-      "Google Cloud Platform",
-      "Amazon Web Services"
+    "TestTypes": [
+      "Integration Testing",
+      "BDD-driven Acceptance Tests",
+      "Allure Test Reporting 2.35.1"
     ]
   },
   "KeyFeatures": [
-    "High density and efficiency",
-    "Low and consistent latency",
-    "Optimized for thermal management",
-    "High performance for demanding workloads",
-    "Power loss protection"
+    "Comprehensive 3D Navigation and Movement Test Suites (Forward, Diagonal, Circular)",
+    "Pick and Place Operation Validation including Gripper Blocking/Collision Scenarios",
+    "Robot Safety Constraint Enforcement (Boundary Checks and Single/Multi-Obstacle Collision Avoidance)",
+    "Sensor Data Integrity Testing (Kalman Filter Convergence and Object Detection Range)",
+    "Locomotion State Verification (Walking, Crouching) from various 3D positions",
+    "Real-time Requirement Traceability and HTML Report Generation"
   ],
-  "Copyright": "\u00a9 2025 Bang Thien Nguyen. All rights reserved."
+  "Copyright": "© 2025 Bang Thien Nguyen. All rights reserved."
 }
