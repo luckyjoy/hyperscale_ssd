@@ -37,17 +37,32 @@ jobs:
       - name: Run Behave Tests (HTML)
         shell: bash
         run: |
+          echo "Running Behave tests..."
           mkdir -p reports
           behave -f html -o reports/report.html || true
+          if [[ -f "reports/report.html" ]]; then
+            echo "✅ HTML report generated at reports/report.html"
+          else
+            echo "⚠️ No HTML report found — generating empty placeholder."
+            echo "<html><body><h2>No tests were executed.</h2></body></html>" > reports/report.html
+          fi
 
-      - name: Extract Summary (Passed/Failed)
+      - name: Extract Summary (Passed/Failed/Skipped)
         shell: bash
         run: |
           echo "Extracting report summary..."
-          TOTAL=$(grep -o "class='scenario passed'" reports/report.html | wc -l)
-          FAILED=$(grep -o "class='scenario failed'" reports/report.html | wc -l)
-          SKIPPED=$(grep -o "class='scenario skipped'" reports/report.html | wc -l)
-          echo "{ \"passed\": $TOTAL, \"failed\": $FAILED, \"skipped\": $SKIPPED, \"timestamp\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\" }" > reports/summary.json
+          REPORT_FILE="reports/report.html"
+          if [[ -f "$REPORT_FILE" ]]; then
+            PASSED=$(grep -o "class=['\"]scenario passed['\"]" "$REPORT_FILE" | wc -l || echo 0)
+            FAILED=$(grep -o "class=['\"]scenario failed['\"]" "$REPORT_FILE" | wc -l || echo 0)
+            SKIPPED=$(grep -o "class=['\"]scenario skipped['\"]" "$REPORT_FILE" | wc -l || echo 0)
+          else
+            echo "⚠️ No report.html found — setting all counts to 0."
+            PASSED=0; FAILED=0; SKIPPED=0
+          fi
+
+          echo "{ \"passed\": $PASSED, \"failed\": $FAILED, \"skipped\": $SKIPPED, \"timestamp\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\" }" > reports/summary.json
+          echo "✅ Summary generated:"
           cat reports/summary.json
 
       - name: Upload Artifacts (Report + Summary)
@@ -78,8 +93,13 @@ jobs:
           echo "Fetching previous dashboard build..."
           mkdir -p site/history
           git fetch origin gh-pages:gh-pages || true
-          git checkout gh-pages || mkdir -p site
-          cp -r site/history ./ || echo "No previous history found."
+          if git rev-parse --verify gh-pages >/dev/null 2>&1; then
+            git checkout gh-pages
+            cp -r history site/ || echo "⚠️ No previous history found."
+          else
+            echo "⚠️ No gh-pages branch found, initializing fresh site."
+          fi
+          git checkout main
 
       - name: Merge History and Append Current Build
         shell: bash
@@ -90,12 +110,11 @@ jobs:
           mkdir -p site/history/$BUILD_ID
           cp -r current/* site/history/$BUILD_ID/
 
-          echo "Updating summary.json..."
           SUMMARY_JSON="site/history/summary.json"
           if [[ -f "$SUMMARY_JSON" ]]; then
-            jq ". + [{\"build\":\"$BUILD_ID\", \"data\":$(cat current/summary.json)}]" $SUMMARY_JSON > site/history/tmp.json && mv site/history/tmp.json $SUMMARY_JSON
+            jq ". + [{\"build\":\"$BUILD_ID\", \"data\":$(cat current/summary.json)}]" "$SUMMARY_JSON" > site/history/tmp.json && mv site/history/tmp.json "$SUMMARY_JSON"
           else
-            echo "[{\"build\":\"$BUILD_ID\", \"data\":$(cat current/summary.json)}]" > $SUMMARY_JSON
+            echo "[{\"build\":\"$BUILD_ID\", \"data\":$(cat current/summary.json)}]" > "$SUMMARY_JSON"
           fi
 
       - name: Rebuild Dashboard Index
@@ -103,14 +122,16 @@ jobs:
         run: |
           echo "Rebuilding dashboard index..."
           mkdir -p site
-          REPORT_COUNT=$(jq 'length' site/history/summary.json)
+          SUMMARY_JSON="site/history/summary.json"
           echo "<html><head><meta charset='utf-8'><title>Build History Dashboard</title></head><body>" > site/index.html
           echo "<h1>📊 Report History & Trends (Times in PDT)</h1>" >> site/index.html
           echo "<table border='1' cellpadding='6'><tr><th>#</th><th>Build</th><th>Passed</th><th>Failed</th><th>Skipped</th><th>Link</th></tr>" >> site/index.html
-          jq -r 'reverse | to_entries[] | "\(.key + 1)|\(.value.build)|\(.value.data.passed)|\(.value.data.failed)|\(.value.data.skipped)"' site/history/summary.json |
+
+          jq -r 'reverse | to_entries[] | "\(.key+1)|\(.value.build)|\(.value.data.passed)|\(.value.data.failed)|\(.value.data.skipped)"' "$SUMMARY_JSON" |
           while IFS="|" read -r idx build passed failed skipped; do
             echo "<tr><td>${idx}</td><td>${build}</td><td>${passed}</td><td>${failed}</td><td>${skipped}</td><td><a href='history/${build}/report.html'>View</a></td></tr>" >> site/index.html
           done
+
           echo "</table></body></html>" >> site/index.html
 
       - name: Deploy to GitHub Pages
