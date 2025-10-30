@@ -4,16 +4,7 @@ on:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main ]
 
-permissions:
-  contents: write
-  pages: write
-  id-token: write
-
-env:
-  SITE_DIR: site
-  
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -30,41 +21,26 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install dependencies
+      - name: Install Dependencies
         shell: bash
         run: |
-          set +e
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            sudo apt-get update
-            sudo apt-get install -y jq
-          else
-            choco install jq -y || true
-          fi
-          
+          pip install behave behave-html-pretty jq
+
       - name: Run Behave Tests
         shell: bash
         run: |
           mkdir -p reports
-          # Run tests and try to generate the report (|| true prevents step failure on test failures)
           behave -f pretty -f behave_html_pretty:reports/report.html -o reports/report.html || true
-          
-          # Check for report file and fail the step if it doesn't exist (critical for debugging missing reports)
-          if [ ! -f reports/report.html ]; then
-            echo "::error::Behave report file reports/report.html was not generated. The test run may have failed completely. Check the logs for the 'Run Behave Tests' step."
-            exit 1
-          fi
 
       - name: Extract Test Summary
-        # FIX: Explicitly use bash shell for the command substitution and utilities
-        shell: bash 
+        shell: bash
         run: |
           TOTAL_PASSED=$(grep -E "passed" reports/report.html | wc -l || echo 0)
           TOTAL_FAILED=$(grep -E "failed" reports/report.html | wc -l || echo 0)
           TOTAL_SKIPPED=$(grep -E "skipped" reports/report.html | wc -l || echo 0)
           jq -n --arg passed "$TOTAL_PASSED" --arg failed "$TOTAL_FAILED" --arg skipped "$TOTAL_SKIPPED" \
-             '{passed: $passed|tonumber, failed: $failed|tonumber, unstable: $skipped|tonumber}' > reports/summary.json
+             '{passed: ($passed|tonumber), failed: ($failed|tonumber), unstable: ($skipped|tonumber)}' > reports/summary.json
           echo "✅ Summary extracted: $(cat reports/summary.json)"
 
       - name: Upload Report Artifact
@@ -89,18 +65,21 @@ jobs:
           path: site/latest/
 
       - name: Download Previous History (if exists)
+        shell: bash
         continue-on-error: true
         run: |
           mkdir -p previous-site
           gh run download --name history --dir previous-site || echo "⚠️ No previous history found."
 
       - name: Generate Build Info
+        shell: bash
         run: |
           mkdir -p site/latest
           date -u > site/latest/build-info.txt
-          echo "Build info recorded: $(cat site/latest/build-info.txt)"
+          echo "📅 Build info recorded: $(cat site/latest/build-info.txt)"
 
       - name: Prepare History
+        shell: bash
         run: |
           mkdir -p site
           BUILD_NUM=$(date +%s)
@@ -112,6 +91,7 @@ jobs:
           fi
 
       - name: Rebuild Dashboard (Behave-HTML-Pretty)
+        shell: bash
         run: |
           set -e
           SITE_DIR="site"
@@ -124,7 +104,7 @@ jobs:
           fi
           mkdir -p "$SITE_DIR"
 
-          # Start HTML
+          # Begin HTML
           {
             echo "<html><head><title>Hyperscale SSD CI Dashboard</title>"
             echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
