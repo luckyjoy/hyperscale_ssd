@@ -1,17 +1,17 @@
-name: Hyperscale SSD CI/CD
+name: CI Pipeline
 
 on:
   push:
     branches: [ main ]
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-
+  test-and-report:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -19,188 +19,103 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
-      - name: Install Dependencies
+      - name: Install dependencies
         shell: bash
         run: |
+          set +e
           python -m pip install --upgrade pip
-          pip install behave behave-html-pretty jq
+          pip install -r requirements.txt
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y jq
+          else
+            choco install jq -y || true
+          fi
 
-      - name: Run Behave Tests
+      - name: Run Behave Tests (HTML)
         shell: bash
         run: |
           mkdir -p reports
-          behave -f pretty -f behave_html_pretty:reports/report.html -o reports/report.html || true
+          behave -f html -o reports/report.html || true
 
-      - name: Extract Test Summary
+      - name: Extract Summary (Passed/Failed)
         shell: bash
         run: |
-          TOTAL_PASSED=$(grep -E "passed" reports/report.html | wc -l || echo 0)
-          TOTAL_FAILED=$(grep -E "failed" reports/report.html | wc -l || echo 0)
-          TOTAL_SKIPPED=$(grep -E "skipped" reports/report.html | wc -l || echo 0)
-          jq -n --arg passed "$TOTAL_PASSED" --arg failed "$TOTAL_FAILED" --arg skipped "$TOTAL_SKIPPED" \
-             '{passed: ($passed|tonumber), failed: ($failed|tonumber), unstable: ($skipped|tonumber)}' > reports/summary.json
-          echo "✅ Summary extracted: $(cat reports/summary.json)"
+          echo "Extracting report summary..."
+          TOTAL=$(grep -o "class='scenario passed'" reports/report.html | wc -l)
+          FAILED=$(grep -o "class='scenario failed'" reports/report.html | wc -l)
+          SKIPPED=$(grep -o "class='scenario skipped'" reports/report.html | wc -l)
+          echo "{ \"passed\": $TOTAL, \"failed\": $FAILED, \"skipped\": $SKIPPED, \"timestamp\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\" }" > reports/summary.json
+          cat reports/summary.json
 
-      - name: Upload Report Artifact
+      - name: Upload Artifacts (Report + Summary)
         uses: actions/upload-artifact@v4
         with:
-          name: behave-report-${{ matrix.os }}
+          name: behave-report
           path: reports/
 
-  deploy:
+  generate-dashboard:
     runs-on: ubuntu-latest
-    needs: test
-
+    needs: test-and-report
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Download Current Reports
+      - name: Download Current Build Artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: behave-report-*
-          merge-multiple: true
-          path: site/latest/
+          name: behave-report
+          path: current/
 
-      - name: Download Previous History (if exists)
-        shell: bash
-        continue-on-error: true
-        run: |
-          mkdir -p previous-site
-          gh run download --name history --dir previous-site || echo "⚠️ No previous history found."
-
-      - name: Generate Build Info
+      - name: Download Previous Build History (if exists)
         shell: bash
         run: |
-          mkdir -p site/latest
-          date -u > site/latest/build-info.txt
-          echo "📅 Build info recorded: $(cat site/latest/build-info.txt)"
+          echo "Fetching previous dashboard build..."
+          mkdir -p site/history
+          git fetch origin gh-pages:gh-pages || true
+          git checkout gh-pages || mkdir -p site
+          cp -r site/history ./ || echo "No previous history found."
 
-      - name: Prepare History
+      - name: Merge History and Append Current Build
         shell: bash
         run: |
+          echo "Merging build history..."
+          mkdir -p site/history
+          BUILD_ID=$(date -u +'%Y%m%d-%H%M%S')
+          mkdir -p site/history/$BUILD_ID
+          cp -r current/* site/history/$BUILD_ID/
+
+          echo "Updating summary.json..."
+          SUMMARY_JSON="site/history/summary.json"
+          if [[ -f "$SUMMARY_JSON" ]]; then
+            jq ". + [{\"build\":\"$BUILD_ID\", \"data\":$(cat current/summary.json)}]" $SUMMARY_JSON > site/history/tmp.json && mv site/history/tmp.json $SUMMARY_JSON
+          else
+            echo "[{\"build\":\"$BUILD_ID\", \"data\":$(cat current/summary.json)}]" > $SUMMARY_JSON
+          fi
+
+      - name: Rebuild Dashboard Index
+        shell: bash
+        run: |
+          echo "Rebuilding dashboard index..."
           mkdir -p site
-          BUILD_NUM=$(date +%s)
-          mkdir -p site/$BUILD_NUM
-          cp -r site/latest/* site/$BUILD_NUM/
-          # Merge any previous history if exists
-          if [ -d previous-site ]; then
-            cp -r previous-site/* site/ || true
-          fi
-
-      - name: Rebuild Dashboard (Behave-HTML-Pretty)
-        shell: bash
-        run: |
-          set -e
-          SITE_DIR="site"
-          TZ='America/Los_Angeles'
-          CURRENT_LA_TIME=$(date)
-
-          # Prevent "index.html is a directory"
-          if [ -d "$SITE_DIR/index.html" ]; then
-            rm -rf "$SITE_DIR/index.html"
-          fi
-          mkdir -p "$SITE_DIR"
-
-          # Begin HTML
-          {
-            echo "<html><head><title>Hyperscale SSD CI Dashboard</title>"
-            echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
-            echo "<style>
-              body{font-family:sans-serif;margin:20px;}
-              ul{list-style:none;padding:0;}
-              li{margin:5px 0;}
-              a{text-decoration:none;color:#007bff;}
-              a:hover{text-decoration:underline;}
-              #chart-container{max-width:900px;height:400px;margin:20px 0;}
-            </style></head><body>"
-            echo "<h1>🤖 Hyperscale SSD Build History</h1>"
-            echo "<h2>Latest Reports</h2><hr><ul>"
-          } > "$SITE_DIR/index.html"
-
-          for OS in ubuntu-latest windows-latest; do
-            if [ -f "$SITE_DIR/latest/$OS/report.html" ]; then
-              TS_UTC=$(cat "$SITE_DIR/latest/build-info.txt" 2>/dev/null || echo "")
-              TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null)
-              echo "<li><a href='latest/$OS/report.html'>${OS} Report</a> (Run: $TS_DISPLAY)</li>" >> "$SITE_DIR/index.html"
-            fi
+          REPORT_COUNT=$(jq 'length' site/history/summary.json)
+          echo "<html><head><meta charset='utf-8'><title>Build History Dashboard</title></head><body>" > site/index.html
+          echo "<h1>📊 Report History & Trends (Times in PDT)</h1>" >> site/index.html
+          echo "<table border='1' cellpadding='6'><tr><th>#</th><th>Build</th><th>Passed</th><th>Failed</th><th>Skipped</th><th>Link</th></tr>" >> site/index.html
+          jq -r 'reverse | to_entries[] | "\(.key + 1)|\(.value.build)|\(.value.data.passed)|\(.value.data.failed)|\(.value.data.skipped)"' site/history/summary.json |
+          while IFS="|" read -r idx build passed failed skipped; do
+            echo "<tr><td>${idx}</td><td>${build}</td><td>${passed}</td><td>${failed}</td><td>${skipped}</td><td><a href='history/${build}/report.html'>View</a></td></tr>" >> site/index.html
           done
-
-          echo "</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2><ul>" >> "$SITE_DIR/index.html"
-
-          BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr || true)
-          LABELS=""
-          PASS_COUNTS=""
-          FAIL_COUNTS=""
-          UNSTABLE_COUNTS=""
-
-          for BUILD in $BUILDS; do
-            TS_UTC=$(cat "$SITE_DIR/$BUILD/build-info.txt" 2>/dev/null || echo "")
-            TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null)
-            echo "<li><strong>Build #$BUILD</strong> (Run: $TS_DISPLAY): " >> "$SITE_DIR/index.html"
-
-            TOTAL_PASS=0
-            TOTAL_FAIL=0
-            TOTAL_UNSTABLE=0
-
-            for OS in ubuntu-latest windows-latest; do
-              SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json"
-              if [ -f "$SUMMARY_FILE" ]; then
-                PASS=$(jq -r '.passed' "$SUMMARY_FILE" 2>/dev/null || echo 0)
-                FAIL=$(jq -r '.failed' "$SUMMARY_FILE" 2>/dev/null || echo 0)
-                UNSTABLE=$(jq -r '.unstable' "$SUMMARY_FILE" 2>/dev/null || echo 0)
-                TOTAL_PASS=$((TOTAL_PASS + PASS))
-                TOTAL_FAIL=$((TOTAL_FAIL + FAIL))
-                TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + UNSTABLE))
-              fi
-            done
-
-            LABELS="$LABELS'$BUILD',"
-            PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
-            FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
-            UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
-
-            echo "PASS: $TOTAL_PASS | FAIL: $TOTAL_FAIL | UNSTABLE: $TOTAL_UNSTABLE " >> "$SITE_DIR/index.html"
-            echo "- <a href='$BUILD/ubuntu-latest/report.html'>Ubuntu</a> / <a href='$BUILD/windows-latest/report.html'>Windows</a></li>" >> "$SITE_DIR/index.html"
-          done
-
-          echo "</ul>
-          <div id='chart-container'><canvas id='trendChart'></canvas></div>
-          <script>
-            const ctx = document.getElementById('trendChart').getContext('2d');
-            new Chart(ctx, {
-              type: 'line',
-              data: {
-                labels: [${LABELS%,}],
-                datasets: [
-                  {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', fill: false},
-                  {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', fill: false},
-                  {label: 'UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
-                ]
-              },
-              options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { position: 'top' } },
-                scales: {
-                  y: { beginAtZero: true, title: { display: true, text: 'Tests' } },
-                  x: { title: { display: true, text: 'Build Number' } }
-                }
-              }
-            });
-          </script>
-          <hr><p><em>Generated: $CURRENT_LA_TIME (PDT)</em></p></body></html>" >> "$SITE_DIR/index.html"
-
-      - name: Upload History for Next Run
-        uses: actions/upload-artifact@v4
-        with:
-          name: history
-          path: site/
+          echo "</table></body></html>" >> site/index.html
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: site
+          publish_branch: gh-pages
