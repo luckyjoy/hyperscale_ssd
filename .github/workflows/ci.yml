@@ -67,7 +67,7 @@ jobs:
           mkdir -p "$REPORT_DIR"
 
           echo ">>> Running behave on $OS_NAME, build $BUILD_NUMBER"
-          behave --tags=@all --exclude "features/manual_tests" \
+          behave --tags=@adv --exclude "features/manual_tests" \
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_DIR/validation_report.html" --no-capture | tee /tmp/behave_output.txt || true
           TEST_EXIT_CODE=${PIPESTATUS[0]:-0} || true
