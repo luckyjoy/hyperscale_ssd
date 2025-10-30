@@ -102,20 +102,31 @@ jobs:
           git checkout main
 
       - name: Merge History and Append Current Build
-        shell: bash
-        run: |
-          echo "Merging build history..."
-          mkdir -p site/history
-          BUILD_ID=$(date -u +'%Y%m%d-%H%M%S')
-          mkdir -p site/history/$BUILD_ID
-          cp -r current/* site/history/$BUILD_ID/
+          shell: bash
+          run: |
+            echo "Merging build history..."
+            mkdir -p site/history
+            BUILD_ID=$(date -u +'%Y%m%d-%H%M%S')
+            mkdir -p site/history/$BUILD_ID
+            cp -r current/* site/history/$BUILD_ID/
 
-          SUMMARY_JSON="site/history/summary.json"
-          if [[ -f "$SUMMARY_JSON" ]]; then
-            jq ". + [{\"build\":\"$BUILD_ID\", \"data\":$(cat current/summary.json)}]" "$SUMMARY_JSON" > site/history/tmp.json && mv site/history/tmp.json "$SUMMARY_JSON"
-          else
-            echo "[{\"build\":\"$BUILD_ID\", \"data\":$(cat current/summary.json)}]" > "$SUMMARY_JSON"
-          fi
+            SUMMARY_JSON="site/history/summary.json"
+
+            # ensure current summary is valid JSON
+            CURRENT_SUMMARY=$(cat current/summary.json | jq .)
+
+            if [[ -f "$SUMMARY_JSON" ]]; then
+              # read existing summary as array
+              EXISTING=$(jq . "$SUMMARY_JSON")
+              # append new build
+              echo "$EXISTING + [{\"build\":\"$BUILD_ID\",\"data\":$CURRENT_SUMMARY}]" | jq . > "$SUMMARY_JSON"
+            else
+              # create new summary.json
+              echo "[{\"build\":\"$BUILD_ID\",\"data\":$CURRENT_SUMMARY}]" | jq . > "$SUMMARY_JSON"
+            fi
+
+            echo "✅ summary.json updated:"
+            cat "$SUMMARY_JSON"
 
       - name: Rebuild Dashboard Index
         shell: bash
