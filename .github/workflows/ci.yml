@@ -13,7 +13,7 @@ permissions:
 
 env:
   SITE_DIR: site
-
+  
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -47,20 +47,18 @@ jobs:
         shell: bash
         run: |
           mkdir -p reports
-          # Run tests and try to generate the report
+          # Run tests and try to generate the report (|| true prevents step failure on test failures)
           behave -f pretty -f behave_html_pretty:reports/report.html -o reports/report.html || true
-
-          # --- FIX 1: Explicitly check for the report file to surface errors ---
+          
+          # Check for report file and fail the step if it doesn't exist (critical for debugging missing reports)
           if [ ! -f reports/report.html ]; then
             echo "::error::Behave report file reports/report.html was not generated. The test run may have failed completely. Check the logs for the 'Run Behave Tests' step."
             exit 1
           fi
-          # --------------------------------------------------------------------
 
       - name: Extract Test Summary
-        # --- FIX 2: Specify shell for Bash syntax on Windows/all runners ---
-        shell: bash
-        # ------------------------------------------------------------------
+        # FIX: Explicitly use bash shell for the command substitution and utilities
+        shell: bash 
         run: |
           TOTAL_PASSED=$(grep -E "passed" reports/report.html | wc -l || echo 0)
           TOTAL_FAILED=$(grep -E "failed" reports/report.html | wc -l || echo 0)
@@ -76,4 +74,153 @@ jobs:
           path: reports/
 
   deploy:
-# ... (rest of the deploy job is unchanged)
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Current Reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: behave-report-*
+          merge-multiple: true
+          path: site/latest/
+
+      - name: Download Previous History (if exists)
+        continue-on-error: true
+        run: |
+          mkdir -p previous-site
+          gh run download --name history --dir previous-site || echo "⚠️ No previous history found."
+
+      - name: Generate Build Info
+        run: |
+          mkdir -p site/latest
+          date -u > site/latest/build-info.txt
+          echo "Build info recorded: $(cat site/latest/build-info.txt)"
+
+      - name: Prepare History
+        run: |
+          mkdir -p site
+          BUILD_NUM=$(date +%s)
+          mkdir -p site/$BUILD_NUM
+          cp -r site/latest/* site/$BUILD_NUM/
+          # Merge any previous history if exists
+          if [ -d previous-site ]; then
+            cp -r previous-site/* site/ || true
+          fi
+
+      - name: Rebuild Dashboard (Behave-HTML-Pretty)
+        run: |
+          set -e
+          SITE_DIR="site"
+          TZ='America/Los_Angeles'
+          CURRENT_LA_TIME=$(date)
+
+          # Prevent "index.html is a directory"
+          if [ -d "$SITE_DIR/index.html" ]; then
+            rm -rf "$SITE_DIR/index.html"
+          fi
+          mkdir -p "$SITE_DIR"
+
+          # Start HTML
+          {
+            echo "<html><head><title>Hyperscale SSD CI Dashboard</title>"
+            echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
+            echo "<style>
+              body{font-family:sans-serif;margin:20px;}
+              ul{list-style:none;padding:0;}
+              li{margin:5px 0;}
+              a{text-decoration:none;color:#007bff;}
+              a:hover{text-decoration:underline;}
+              #chart-container{max-width:900px;height:400px;margin:20px 0;}
+            </style></head><body>"
+            echo "<h1>🤖 Hyperscale SSD Build History</h1>"
+            echo "<h2>Latest Reports</h2><hr><ul>"
+          } > "$SITE_DIR/index.html"
+
+          for OS in ubuntu-latest windows-latest; do
+            if [ -f "$SITE_DIR/latest/$OS/report.html" ]; then
+              TS_UTC=$(cat "$SITE_DIR/latest/build-info.txt" 2>/dev/null || echo "")
+              TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null)
+              echo "<li><a href='latest/$OS/report.html'>${OS} Report</a> (Run: $TS_DISPLAY)</li>" >> "$SITE_DIR/index.html"
+            fi
+          done
+
+          echo "</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2><ul>" >> "$SITE_DIR/index.html"
+
+          BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr || true)
+          LABELS=""
+          PASS_COUNTS=""
+          FAIL_COUNTS=""
+          UNSTABLE_COUNTS=""
+
+          for BUILD in $BUILDS; do
+            TS_UTC=$(cat "$SITE_DIR/$BUILD/build-info.txt" 2>/dev/null || echo "")
+            TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null)
+            echo "<li><strong>Build #$BUILD</strong> (Run: $TS_DISPLAY): " >> "$SITE_DIR/index.html"
+
+            TOTAL_PASS=0
+            TOTAL_FAIL=0
+            TOTAL_UNSTABLE=0
+
+            for OS in ubuntu-latest windows-latest; do
+              SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/summary.json"
+              if [ -f "$SUMMARY_FILE" ]; then
+                PASS=$(jq -r '.passed' "$SUMMARY_FILE" 2>/dev/null || echo 0)
+                FAIL=$(jq -r '.failed' "$SUMMARY_FILE" 2>/dev/null || echo 0)
+                UNSTABLE=$(jq -r '.unstable' "$SUMMARY_FILE" 2>/dev/null || echo 0)
+                TOTAL_PASS=$((TOTAL_PASS + PASS))
+                TOTAL_FAIL=$((TOTAL_FAIL + FAIL))
+                TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + UNSTABLE))
+              fi
+            done
+
+            LABELS="$LABELS'$BUILD',"
+            PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
+            FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
+            UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
+
+            echo "PASS: $TOTAL_PASS | FAIL: $TOTAL_FAIL | UNSTABLE: $TOTAL_UNSTABLE " >> "$SITE_DIR/index.html"
+            echo "- <a href='$BUILD/ubuntu-latest/report.html'>Ubuntu</a> / <a href='$BUILD/windows-latest/report.html'>Windows</a></li>" >> "$SITE_DIR/index.html"
+          done
+
+          echo "</ul>
+          <div id='chart-container'><canvas id='trendChart'></canvas></div>
+          <script>
+            const ctx = document.getElementById('trendChart').getContext('2d');
+            new Chart(ctx, {
+              type: 'line',
+              data: {
+                labels: [${LABELS%,}],
+                datasets: [
+                  {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', fill: false},
+                  {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', fill: false},
+                  {label: 'UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
+                ]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                  y: { beginAtZero: true, title: { display: true, text: 'Tests' } },
+                  x: { title: { display: true, text: 'Build Number' } }
+                }
+              }
+            });
+          </script>
+          <hr><p><em>Generated: $CURRENT_LA_TIME (PDT)</em></p></body></html>" >> "$SITE_DIR/index.html"
+
+      - name: Upload History for Next Run
+        uses: actions/upload-artifact@v4
+        with:
+          name: history
+          path: site/
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: site
