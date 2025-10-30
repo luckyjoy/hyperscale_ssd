@@ -41,6 +41,7 @@ jobs:
           behave -f pretty -f behave_html_pretty:reports/report.html -o reports/report.html || true
 
       - name: Extract Test Summary
+        shell: bash
         run: |
           TOTAL_PASSED=$(grep -E "passed" reports/report.html | wc -l || echo 0)
           TOTAL_FAILED=$(grep -E "failed" reports/report.html | wc -l || echo 0)
