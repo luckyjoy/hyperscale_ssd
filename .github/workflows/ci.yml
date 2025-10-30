@@ -35,6 +35,7 @@ jobs:
           fi
           
       - name: Run Behave Tests
+        shell: bash
         run: |
           mkdir -p reports
           behave -f pretty -f behave_html_pretty:reports/report.html -o reports/report.html || true
