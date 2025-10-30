@@ -1,28 +1,32 @@
-name: CI Pipeline
+name: Hyperscale SSD Framework CI/CD
 
 on:
   push:
     branches: [ main ]
   pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  test-and-report:
-    runs-on: ubuntu-latest
+  test:
+    name: Run Behave Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     defaults:
       run:
         shell: bash
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: 3.11
 
       - name: Install dependencies
-        shell: bash
         run: |
           set +e
           python -m pip install --upgrade pip
@@ -35,115 +39,102 @@ jobs:
           fi
 
       - name: Run Behave Tests (HTML)
-        shell: bash
         run: |
           echo "Running Behave tests..."
-          mkdir -p reports
-          behave -f html -o reports/report.html || true
-          if [[ -f "reports/report.html" ]]; then
-            echo "✅ HTML report generated at reports/report.html"
-          else
-            echo "⚠️ No HTML report found — generating empty placeholder."
-            echo "<html><body><h2>No tests were executed.</h2></body></html>" > reports/report.html
-          fi
+          BUILD_NUMBER=${{ github.run_number }}
+          OS_NAME=${{ matrix.os }}
+          REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
+          mkdir -p "$REPORT_DIR"
 
-      - name: Extract Summary (Passed/Failed/Skipped)
-        shell: bash
-        run: |
-          echo "Extracting report summary..."
-          REPORT_FILE="reports/report.html"
-          if [[ -f "$REPORT_FILE" ]]; then
-            PASSED=$(grep -o "class=['\"]scenario passed['\"]" "$REPORT_FILE" | wc -l || echo 0)
-            FAILED=$(grep -o "class=['\"]scenario failed['\"]" "$REPORT_FILE" | wc -l || echo 0)
-            SKIPPED=$(grep -o "class=['\"]scenario skipped['\"]" "$REPORT_FILE" | wc -l || echo 0)
-          else
-            echo "⚠️ No report.html found — setting all counts to 0."
-            PASSED=0; FAILED=0; SKIPPED=0
-          fi
+          behave --tags=@adv --exclude "features/manual_tests" \
+            --format behave_html_pretty_formatter:PrettyHTMLFormatter \
+            -o "$REPORT_DIR/report.html" --no-capture || true
 
-          echo "{ \"passed\": $PASSED, \"failed\": $FAILED, \"skipped\": $SKIPPED, \"timestamp\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\" }" > reports/summary.json
-          echo "✅ Summary generated:"
-          cat reports/summary.json
+          # Ensure summary.json exists
+          PASSED=$(grep -o "class=['\"]scenario passed['\"]" "$REPORT_DIR/report.html" | wc -l || echo 0)
+          FAILED=$(grep -o "class=['\"]scenario failed['\"]" "$REPORT_DIR/report.html" | wc -l || echo 0)
+          SKIPPED=$(grep -o "class=['\"]scenario skipped['\"]" "$REPORT_DIR/report.html" | wc -l || echo 0)
 
-      - name: Upload Artifacts (Report + Summary)
+          jq -n --argjson p "$PASSED" --argjson f "$FAILED" --argjson s "$SKIPPED" \
+            '{passed: $p, failed: $f, skipped: $s, timestamp: "'$(date -u +'%Y-%m-%dT%H:%M:%SZ')'"}' \
+            > "$REPORT_DIR/summary.json"
+
+          echo "✅ Report generated at $REPORT_DIR"
+          echo "PASSED=$PASSED, FAILED=$FAILED, SKIPPED=$SKIPPED"
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: behave-report
-          path: reports/
+          name: behave-report-${{ matrix.os }}
+          path: reports/${{ github.run_number }}/${{ matrix.os }}/
 
   generate-dashboard:
+    name: Generate Reports & Deploy
     runs-on: ubuntu-latest
-    needs: test-and-report
+    needs: test
     defaults:
       run:
         shell: bash
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Download Current Build Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: behave-report
-          path: current/
-
-      - name: Download Previous Build History (if exists)
-        shell: bash
-        run: |
-          echo "Fetching previous dashboard build..."
-          mkdir -p site/history
-          git fetch origin gh-pages:gh-pages || true
-          if git rev-parse --verify gh-pages >/dev/null 2>&1; then
-            git checkout gh-pages
-            cp -r history site/ || echo "⚠️ No previous history found."
-          else
-            echo "⚠️ No gh-pages branch found, initializing fresh site."
-          fi
-          git checkout main
+          name: behave-report-ubuntu-latest
+          path: current/ubuntu-latest
+      - uses: actions/download-artifact@v4
+        with:
+          name: behave-report-windows-latest
+          path: current/windows-latest
 
       - name: Merge History and Append Current Build
-        shell: bash
         run: |
-            echo "Merging build history..."
-            mkdir -p site/history
-            BUILD_ID=$(date -u +'%Y%m%d-%H%M%S')
-            mkdir -p site/history/$BUILD_ID
-            cp -r current/* site/history/$BUILD_ID/
+          echo "Merging build history..."
+          mkdir -p site/history
+          BUILD_ID=$(date -u +'%Y%m%d-%H%M%S')
 
-            SUMMARY_JSON="site/history/summary.json"
+          for OS in ubuntu-latest windows-latest; do
+            mkdir -p site/history/$BUILD_ID/$OS
+            cp -r current/$OS/* site/history/$BUILD_ID/$OS/
+          done
 
-            # Ensure current summary is valid JSON
-            if [[ ! -f current/summary.json ]]; then
-              echo "{}" > current/summary.json
-            fi
+          SUMMARY_JSON="site/history/summary.json"
+          mkdir -p site/history
+          if [[ ! -f "$SUMMARY_JSON" ]]; then
+            echo "[]" > "$SUMMARY_JSON"
+          fi
 
-            if [[ -f "$SUMMARY_JSON" ]]; then
-              # Append new build safely
-              jq --slurpfile new current/summary.json '. + [{"build":"'"$BUILD_ID"'","data":$new[0]}]' "$SUMMARY_JSON" > site/history/tmp.json
-              mv site/history/tmp.json "$SUMMARY_JSON"
-            else
-              jq --slurpfile new current/summary.json '[{"build":"'"$BUILD_ID"'","data":$new[0]}]' < /dev/null > "$SUMMARY_JSON"
-            fi
-
-            echo "✅ summary.json updated:"
-            cat "$SUMMARY_JSON"
+          # Combine summaries of both OS for this build
+          COMBINED_SUMMARY=$(jq -s '.[0] + .[1]' current/ubuntu-latest/summary.json current/windows-latest/summary.json)
+          jq --slurpfile new <(echo "$COMBINED_SUMMARY") '. + [{"build":"'"$BUILD_ID"'","data":$new[0]}]' "$SUMMARY_JSON" > site/history/tmp.json
+          mv site/history/tmp.json "$SUMMARY_JSON"
+          echo "✅ summary.json updated:"
+          cat "$SUMMARY_JSON"
 
       - name: Rebuild Dashboard Index
-        shell: bash
         run: |
           echo "Rebuilding dashboard index..."
           mkdir -p site
           SUMMARY_JSON="site/history/summary.json"
+
           echo "<html><head><meta charset='utf-8'><title>Build History Dashboard</title></head><body>" > site/index.html
-          echo "<h1>📊 Report History & Trends (Times in PDT)</h1>" >> site/index.html
-          echo "<table border='1' cellpadding='6'><tr><th>#</th><th>Build</th><th>Passed</th><th>Failed</th><th>Skipped</th><th>Link</th></tr>" >> site/index.html
+          echo "<h1>📊 Hyperscale SSD Framework CI/CD Build History</h1>" >> site/index.html
+          echo "<table border='1' cellpadding='6'><tr><th>#</th><th>Build</th><th>Passed</th><th>Failed</th><th>Skipped</th><th>Ubuntu Report</th><th>Windows Report</th></tr>" >> site/index.html
 
           jq -r 'reverse | to_entries[] | "\(.key+1)|\(.value.build)|\(.value.data.passed)|\(.value.data.failed)|\(.value.data.skipped)"' "$SUMMARY_JSON" |
           while IFS="|" read -r idx build passed failed skipped; do
-            echo "<tr><td>${idx}</td><td>${build}</td><td>${passed}</td><td>${failed}</td><td>${skipped}</td><td><a href='history/${build}/report.html'>View</a></td></tr>" >> site/index.html
+            echo "<tr><td>${idx}</td><td>${build}</td><td>${passed}</td><td>${failed}</td><td>${skipped}</td>" \
+                 "<td><a href='history/${build}/ubuntu-latest/report.html'>View</a></td>" \
+                 "<td><a href='history/${build}/windows-latest/report.html'>View</a></td></tr>" >> site/index.html
           done
 
           echo "</table></body></html>" >> site/index.html
+          echo "✅ Dashboard rebuilt at site/index.html"
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
