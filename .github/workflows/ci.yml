@@ -102,8 +102,8 @@ jobs:
           git checkout main
 
       - name: Merge History and Append Current Build
-          shell: bash
-          run: |
+        shell: bash
+        run: |
             echo "Merging build history..."
             mkdir -p site/history
             BUILD_ID=$(date -u +'%Y%m%d-%H%M%S')
