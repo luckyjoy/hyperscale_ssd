@@ -97,14 +97,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Fix: Dynamically find the workflow filename.
+      - name: Get workflow filename
+        id: get_workflow_name
+        run: echo "WORKFLOW_FILE=$(basename .github/workflows/*.yml)" >> $GITHUB_ENV
+
+      # Fix: Use previous working download artifact method
       - name: Download previous Allure history artifact
         uses: dawidd6/action-download-artifact@v6
         with:
-          workflow: ${{ github.workflow }}
+          workflow: ${{ env.WORKFLOW_FILE }}
           branch: main
           name: allure-history
           path: previous-site
           if_no_artifact_found: ignore
+
 
       - name: Restore Allure History
         run: |
