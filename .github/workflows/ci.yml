@@ -7,6 +7,11 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  
 env:
   SITE_DIR: site
 
@@ -53,7 +58,7 @@ jobs:
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_DIR/report.html" --no-capture || true
 
-          # Generate summary.json for this OS
+          # Generate summary.json safely
           PASSED=$(grep -o "class=['\"]scenario passed['\"]" "$REPORT_DIR/report.html" | wc -l || echo 0)
           FAILED=$(grep -o "class=['\"]scenario failed['\"]" "$REPORT_DIR/report.html" | wc -l || echo 0)
           SKIPPED=$(grep -o "class=['\"]scenario skipped['\"]" "$REPORT_DIR/report.html" | wc -l || echo 0)
@@ -98,27 +103,31 @@ jobs:
       - name: Merge History and Append Current Build
         run: |
           echo "Merging build history..."
-          mkdir -p ${{ env.SITE_DIR }}/history
+          HISTORY_DIR=${{ env.SITE_DIR }}/history
+          mkdir -p "$HISTORY_DIR"
           BUILD_ID=$(date -u +'%Y%m%d-%H%M%S')
 
+          # Copy OS reports
           for OS in ubuntu-latest windows-latest; do
-            mkdir -p ${{ env.SITE_DIR }}/history/$BUILD_ID/$OS
-            cp -r current/$OS/* ${{ env.SITE_DIR }}/history/$BUILD_ID/$OS/
+            mkdir -p "$HISTORY_DIR/$BUILD_ID/$OS"
+            cp -r current/$OS/* "$HISTORY_DIR/$BUILD_ID/$OS/"
           done
 
-          SUMMARY_JSON="${{ env.SITE_DIR }}/history/summary.json"
-          [[ ! -f "$SUMMARY_JSON" ]] && echo "[]" > "$SUMMARY_JSON"
+          # Ensure summary.json exists
+          HISTORY_JSON="$HISTORY_DIR/summary.json"
+          [[ ! -f "$HISTORY_JSON" ]] && echo "[]" > "$HISTORY_JSON"
 
-          # Merge summaries safely
+          # Combine Ubuntu + Windows summaries safely
           TMP_COMBINED=$(mktemp)
           jq -s '.[0] + .[1]' current/ubuntu-latest/summary.json current/windows-latest/summary.json > "$TMP_COMBINED"
 
-          jq --slurpfile new "$TMP_COMBINED" '. + [{"build":"'"$BUILD_ID"'","data":$new[0]}]' "$SUMMARY_JSON" > ${{ env.SITE_DIR }}/history/tmp.json
-          mv ${{ env.SITE_DIR }}/history/tmp.json "$SUMMARY_JSON"
+          # Append combined summary to history
+          jq --slurpfile new "$TMP_COMBINED" '. + [{"build":"'"$BUILD_ID"'","data":$new[0]}]' "$HISTORY_JSON" > "$HISTORY_DIR/tmp.json"
+          mv "$HISTORY_DIR/tmp.json" "$HISTORY_JSON"
           rm "$TMP_COMBINED"
 
-          echo "✅ summary.json updated:"
-          cat "$SUMMARY_JSON"
+          echo "✅ History updated:"
+          cat "$HISTORY_JSON"
 
       - name: Build Dashboard with Trend Chart
         run: |
