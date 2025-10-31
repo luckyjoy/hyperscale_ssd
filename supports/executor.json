@@ -1,14 +1,14 @@
 {
-  "name": "Robotics BDD Framework Runner",
+  "name": "Hyperscale SSD Framework Runner",
   "type": "CI_Pipeline",
-  "url": "${env.JENKINS_URL}",
+  "url": "https://github.com/luckyjoy/hyperscale_ssd/actions/",
   "buildOrder": "${env.BUILD_ID}",
-  "buildName": "Robotics BDD #${env.BUILD_ID}",
-  "buildUrl": "${env.BUILD_URL}",
+  "buildName": "Hyperscale SSD #${env.BUILD_ID}",
+  "buildUrl": "https://github.com/your-org/your-repo/actions/runs/105",
   "reportUrl": "${env.BUILD_URL}artifact/${ALLURE_REPORT_DIR}/index.html",
+  "description": "Executed Behave/Allure tests for SSD Hyperscale and Resilience validation."
   "data": {
-    "Validation Engineer": "TBD",
-    "Product Model": "BDD-Sim-PyBullet",
+    "Product Model": "Hyperscale SSD V029",
     "Test Framework": "Gherkin (Behave)"
   }
 }
