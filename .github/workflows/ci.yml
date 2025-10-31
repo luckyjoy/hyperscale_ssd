@@ -1,18 +1,18 @@
-name: Hyperscale SSD CI
+name: CI Build Dashboard
 
 on:
   push:
     branches: [ main ]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: write
   pages: write
   id-token: write
-  
+
 jobs:
   build:
-    name: Run Behave Tests on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -22,122 +22,122 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
       - name: Install dependencies
         shell: bash
         run: |
-          set +e
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install behave-html-pretty || true
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            sudo apt-get update
-            sudo apt-get install -y jq
-          else
-            choco install jq -y || true
-          fi
+          pip install behave allure-behave jq
 
-      - name: Run Behave Tests
+      - name: Run Behave tests
         shell: bash
         run: |
           echo "Running Behave tests..."
-          BUILD_NUMBER=${{ github.run_number }}
-          OS_NAME=${{ matrix.os }}
-          REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
-          mkdir -p "$REPORT_DIR"
+          behave --no-capture | tee behave_output.txt
+          echo "Detecting stats line..."
+          tail -n 20 behave_output.txt | grep -E "scenarios.*(passed|failed|skipped)" | tee stats_line.txt || true
+          echo "Detected stats line:"
+          cat stats_line.txt || true
 
-          BEHAVE_OUTPUT=$(mktemp)
-          behave --tags=@adv --exclude "features/manual_tests" \
-            --format behave_html_pretty_formatter:PrettyHTMLFormatter \
-            -o "$REPORT_DIR/report.html" --no-capture | tee "$BEHAVE_OUTPUT" || true
+      - name: Generate build summary
+        shell: bash
+        run: |
+          mkdir -p history
+          BUILD_NUMBER="${{ github.run_number }}"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          REPORT_URL="builds/${{ matrix.os }}/build_${BUILD_NUMBER}/index.html"
 
-          STATS_LINE=$(grep -E "scenarios?" "$BEHAVE_OUTPUT" | tail -1)
-          echo "Detected stats line: $STATS_LINE"
+          PASSED=$(grep -oE '[0-9]+ scenarios passed' behave_output.txt | awk '{print $1}' || echo 0)
+          FAILED=$(grep -oE '[0-9]+ scenarios failed' behave_output.txt | awk '{print $1}' || echo 0)
+          SKIPPED=$(grep -oE '[0-9]+ scenarios skipped' behave_output.txt | awk '{print $1}' || echo 0)
 
-          # Safe extraction using awk (works on Windows + Linux)
-          PASSED=$(echo "$STATS_LINE" | awk '{for(i=1;i<=NF;i++){if($i=="scenarios"&&$(i+1)=="passed,"){print $(i-1)}}}' )
-          FAILED=$(echo "$STATS_LINE" | awk '{for(i=1;i<=NF;i++){if($i=="failed,"){print $(i-1)}}}' )
-          SKIPPED=$(echo "$STATS_LINE" | awk '{for(i=1;i<=NF;i++){if($i=="skipped"){print $(i-1)}}}' )
+          echo "{
+            \"build\": ${BUILD_NUMBER},
+            \"os\": \"${{ matrix.os }}\",
+            \"timestamp\": \"${TIMESTAMP}\",
+            \"passed\": ${PASSED},
+            \"failed\": ${FAILED},
+            \"skipped\": ${SKIPPED},
+            \"report_url\": \"${REPORT_URL}\",
+            \"commit\": \"${GITHUB_SHA}\"
+          }" > "history/summary.json"
 
-          # Defaults to 0 if missing or empty
-          PASSED=${PASSED:-0}
-          FAILED=${FAILED:-0}
-          SKIPPED=${SKIPPED:-0}
+          echo "✅ Created summary.json:"
+          cat history/summary.json
 
-          # Force numeric conversion
-          PASSED=$((PASSED))
-          FAILED=$((FAILED))
-          SKIPPED=$((SKIPPED))
-
-          jq -n --argjson p "$PASSED" --argjson f "$FAILED" --argjson s "$SKIPPED" \
-            '{passed:$p, failed:$f, skipped:$s, os:"'${OS_NAME}'", build:"'${BUILD_NUMBER}'", timestamp:"'$(date -u +'%Y-%m-%dT%H:%M:%SZ')'"}' \
-            > "$REPORT_DIR/summary.json"
-
-          echo "✅ summary.json generated:"
-          cat "$REPORT_DIR/summary.json"
-
-      - name: Upload report artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}
-          path: reports/${{ github.run_number }}/${{ matrix.os }}/
+          name: behave-output-${{ matrix.os }}
+          path: |
+            behave_output.txt
+            history/summary.json
 
-  merge:
-    name: Merge Build History
-    needs: build
+  merge-history:
     runs-on: ubuntu-latest
+    needs: build
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download all reports
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: history/
+          path: artifacts
 
-      - name: Merge summaries
+      - name: Prepare site directory
+        run: mkdir -p site builds
+
+      - name: Merge build summaries
         shell: bash
         run: |
           echo "Merging summaries..."
           mkdir -p site
-          CURRENT_SUMMARY=$(find history -name summary.json -type f)
+          summaries=$(find artifacts -name summary.json)
 
           if [[ -f site/history.json ]]; then
-            jq -s '.[0] + .[1]' site/history.json <(jq -s 'flatten' $CURRENT_SUMMARY) > site/merged.json 2>/dev/null || jq -s 'add | .[0]' $CURRENT_SUMMARY > site/merged.json
+            cp site/history.json site/history_old.json
           else
-            jq -s '.' $CURRENT_SUMMARY > site/merged.json
+            echo "[]" > site/history_old.json
           fi
 
-          mv site/merged.json site/history.json
-          echo "✅ Updated site/history.json:"
+          jq -s 'add' site/history_old.json $summaries > site/history.json
+          echo "✅ Merged site/history.json:"
           cat site/history.json
 
-      - name: Generate dashboard index.html
+      - name: Build dashboard
         shell: bash
         run: |
-          echo "Rebuilding dashboard..."
-          BUILD_TABLE=$(jq -r '
-            ["#", "Build", "Passed", "Failed", "Skipped", "Ubuntu", "Windows"],
-            (to_entries | reverse | map(
-              [.key + 1,
-               .value.build,
-               .value.passed,
-               .value.failed,
-               .value.skipped,
-               (if .value.os == "ubuntu-latest" then "View" else "" end),
-               (if .value.os == "windows-latest" then "View" else "" end)
-              ]
-            )[]) | @tsv' site/history.json)
+          mkdir -p site
+          echo '<!DOCTYPE html>' > site/index.html
+          echo '<html lang="en"><head><meta charset="UTF-8">' >> site/index.html
+          echo '<title>🏗️ Build History Dashboard</title>' >> site/index.html
+          echo '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>' >> site/index.html
+          echo '<style>body{font-family:Arial,sans-serif;background:#0f1117;color:#ddd;padding:20px;}h1{color:#00e676;}table{width:100%;border-collapse:collapse;margin-top:20px;}th,td{padding:10px;text-align:left;border-bottom:1px solid #333;}a{color:#66ccff;text-decoration:none;}a:hover{text-decoration:underline;}canvas{margin-top:40px;background:#1a1d24;border-radius:8px;padding:10px;}</style></head>' >> site/index.html
+          echo '<body><h1>🚀 Build History Dashboard</h1><p>Track CI builds, results, and trends.</p>' >> site/index.html
+          echo '<table id="buildTable"><thead><tr><th>Build</th><th>OS</th><th>Timestamp</th><th>Passed</th><th>Failed</th><th>Skipped</th><th>Commit</th><th>Report</th></tr></thead><tbody></tbody></table><canvas id="trendChart" height="120"></canvas>' >> site/index.html
+          echo '<script>fetch("history.json").then(r=>r.json()).then(d=>{const b=document.querySelector("#buildTable tbody");const l=[],p=[],f=[];d.sort((a,b)=>a.build-b.build).forEach(x=>{const r=document.createElement("tr");r.innerHTML=`<td>${x.build}</td><td>${x.os}</td><td>${new Date(x.timestamp).toLocaleString()}</td><td style=color:#00e676>${x.passed}</td><td style=color:#ff5252>${x.failed}</td><td>${x.skipped}</td><td><code>${x.commit.substring(0,7)}</code></td><td><a href=${x.report_url} target=_blank>View</a></td>`;b.appendChild(r);l.push("Build "+x.build+" ("+x.os+")");p.push(x.passed);f.push(x.failed)});new Chart(document.getElementById("trendChart"),{type:"line",data:{labels:l,datasets:[{label:"Passed",data:p,borderColor:"#00e676",fill:false},{label:"Failed",data:f,borderColor:"#ff5252",fill:false}]},options:{scales:{y:{beginAtZero:true,ticks:{color:"#aaa"}},x:{ticks:{color:"#aaa"}}},plugins:{legend:{labels:{color:"#fff"}}}}})}).catch(e=>console.error(e));</script>' >> site/index.html
+          echo '</body></html>' >> site/index.html
+          echo "✅ Dashboard HTML generated successfully."
 
-          {
-            echo "<html><head><title>Hyperscale SSD Build Dashboard</title></head><body>"
-            echo "<h2>Report History & Trends (Times in PDT)</h2><pre>$BUILD_TABLE</pre>"
-            echo "</body></html>"
-          } > site/index.html
-
-          echo "✅ Dashboard index.html generated."
-
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Upload dashboard artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: site
+          path: site
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: merge-history
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
