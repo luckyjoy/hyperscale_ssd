@@ -1,45 +1,30 @@
-name: Hyperscale SSD Framework CI/CD
+name: Hyperscale SSD CI
 
 on:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main ]
-  workflow_dispatch:
-
-permissions:
-  contents: write
-  pages: write
-  id-token: write
-
-env:
-  SITE_DIR: site
 
 jobs:
-  test:
-    name: Run Behave Tests
+  build:
+    name: Run Behave Tests on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
-    defaults:
-      run:
-        shell: bash
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.11
-
       - name: Install dependencies
+        shell: bash
         run: |
           set +e
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          if [[ "${{ matrix.os }}" == "Linux" ]]; then
+          pip install behave-html-pretty || true
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
             sudo apt-get update
             sudo apt-get install -y jq
           else
@@ -47,6 +32,7 @@ jobs:
           fi
 
       - name: Run Behave Tests
+        shell: bash
         run: |
           echo "Running Behave tests..."
           BUILD_NUMBER=${{ github.run_number }}
@@ -54,149 +40,96 @@ jobs:
           REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
           mkdir -p "$REPORT_DIR"
 
-          # Run behave with HTML pretty report
           BEHAVE_OUTPUT=$(mktemp)
           behave --tags=@adv --exclude "features/manual_tests" \
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_DIR/report.html" --no-capture | tee "$BEHAVE_OUTPUT" || true
 
-          # Parse scenario counts from text output
-          PASSED=$(grep -Po '(\d+) scenarios? passed' "$BEHAVE_OUTPUT" | grep -Po '\d+' | head -1)
-          FAILED=$(grep -Po '(\d+) failed' "$BEHAVE_OUTPUT" | grep -Po '\d+' | head -1)
-          SKIPPED=$(grep -Po '(\d+) skipped' "$BEHAVE_OUTPUT" | grep -Po '\d+' | head -1)
+          STATS_LINE=$(grep -E 'scenarios?' "$BEHAVE_OUTPUT" | tail -1)
+          echo "Detected stats line: $STATS_LINE"
 
-          # Default to 0 if empty
+          PASSED=$(echo "$STATS_LINE" | grep -Po '(\d+)\s+scenarios?\s+passed' | grep -Po '\d+' | head -1)
+          FAILED=$(echo "$STATS_LINE" | grep -Po '(\d+)\s+failed' | grep -Po '\d+' | head -1)
+          SKIPPED=$(echo "$STATS_LINE" | grep -Po '(\d+)\s+skipped' | grep -Po '\d+' | head -1)
+
           PASSED=${PASSED:-0}
           FAILED=${FAILED:-0}
           SKIPPED=${SKIPPED:-0}
 
-          # Force numeric
           PASSED=$((PASSED))
           FAILED=$((FAILED))
           SKIPPED=$((SKIPPED))
 
-          # Write summary.json
           jq -n --argjson p "$PASSED" --argjson f "$FAILED" --argjson s "$SKIPPED" \
-            '{passed: $p, failed: $f, skipped: $s, timestamp: "'$(date -u +'%Y-%m-%dT%H:%M:%SZ')'"}' \
+            '{passed:$p, failed:$f, skipped:$s, os:"'${OS_NAME}'", build:"'${BUILD_NUMBER}'", timestamp:"'$(date -u +'%Y-%m-%dT%H:%M:%SZ')'"}' \
             > "$REPORT_DIR/summary.json"
 
-          echo "✅ summary.json generated at $REPORT_DIR:"
+          echo "✅ summary.json generated:"
           cat "$REPORT_DIR/summary.json"
 
-      - name: Upload Artifacts
+      - name: Upload report artifact
         uses: actions/upload-artifact@v4
         with:
-          name: behave-report-${{ matrix.os }}
+          name: ${{ matrix.os }}
           path: reports/${{ github.run_number }}/${{ matrix.os }}/
 
-  generate-dashboard:
-    name: Generate Reports & Deploy
+  merge:
+    name: Merge Build History
+    needs: build
     runs-on: ubuntu-latest
-    needs: test
-    defaults:
-      run:
-        shell: bash
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Download Artifacts
+      - name: Download all reports
         uses: actions/download-artifact@v4
         with:
-          name: behave-report-ubuntu-latest
-          path: current/ubuntu-latest
-      - uses: actions/download-artifact@v4
-        with:
-          name: behave-report-windows-latest
-          path: current/windows-latest
+          path: history/
 
-      - name: Merge History and Append Current Build
+      - name: Merge summaries
+        shell: bash
         run: |
-          echo "Merging build history..."
-          HISTORY_DIR=${{ env.SITE_DIR }}/history
-          mkdir -p "$HISTORY_DIR"
-          BUILD_ID=${{ github.run_number }}
+          echo "Merging summaries..."
+          mkdir -p site
+          CURRENT_SUMMARY=$(find history -name summary.json -type f)
 
-          # Copy OS reports
-          for OS in ubuntu-latest windows-latest; do
-            mkdir -p "$HISTORY_DIR/$BUILD_ID/$OS"
-            cp -r current/$OS/* "$HISTORY_DIR/$BUILD_ID/$OS/"
-          done
+          if [[ -f site/history.json ]]; then
+            jq -s 'add' site/history.json $CURRENT_SUMMARY > site/merged.json
+          else
+            jq -s 'add' $CURRENT_SUMMARY > site/merged.json
+          fi
 
-          # Ensure history.json exists
-          HISTORY_JSON="$HISTORY_DIR/summary.json"
-          [[ ! -f "$HISTORY_JSON" ]] && echo "[]" > "$HISTORY_JSON"
+          mv site/merged.json site/history.json
+          echo "✅ Updated site/history.json:"
+          cat site/history.json
 
-          # Combine Ubuntu + Windows summaries safely
-          TMP_JSON=$(mktemp)
-          jq -n --slurpfile u current/ubuntu-latest/summary.json --slurpfile w current/windows-latest/summary.json \
-            '{"passed": ($u[0].passed + $w[0].passed), "failed": ($u[0].failed + $w[0].failed), "skipped": ($u[0].skipped + $w[0].skipped), "timestamp": "'$(date -u +'%Y-%m-%dT%H:%M:%SZ')'"}' \
-            > "$TMP_JSON"
-
-          # Append to history
-          jq --slurpfile new "$TMP_JSON" '. + [{"build":"'"$BUILD_ID"'","data":$new[0]}]' "$HISTORY_JSON" > "$HISTORY_DIR/tmp.json"
-          mv "$HISTORY_DIR/tmp.json" "$HISTORY_JSON"
-          rm "$TMP_JSON"
-
-          echo "✅ History updated:"
-          cat "$HISTORY_JSON"
-
-      - name: Build Dashboard with Trend Chart
+      - name: Generate dashboard index.html
+        shell: bash
         run: |
-          echo "Building dashboard..."
-          mkdir -p ${{ env.SITE_DIR }}
-          SUMMARY_JSON="${{ env.SITE_DIR }}/history/summary.json"
-          INDEX_HTML="${{ env.SITE_DIR }}/index.html"
-
-          echo "<html><head><title>Hyperscale SSD Dashboard</title>
-          <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
-          <style>body{font-family:sans-serif;margin:20px;}table{border-collapse:collapse;}td,th{padding:6px;border:1px solid #ccc;}</style>
-          </head><body>" > "$INDEX_HTML"
-
-          echo "<h1>📊 Hyperscale SSD Framework CI/CD Build History</h1>" >> "$INDEX_HTML"
-
-          # Table of builds
-          echo "<h2>Builds</h2><table><tr><th>#</th><th>Build</th><th>Passed</th><th>Failed</th><th>Skipped</th><th>Ubuntu</th><th>Windows</th></tr>" >> "$INDEX_HTML"
-
-          jq -r 'reverse | to_entries[] | "\(.key+1)|\(.value.build)|\(.value.data.passed)|\(.value.data.failed)|\(.value.data.skipped)"' "$SUMMARY_JSON" |
-          while IFS="|" read -r idx build passed failed skipped; do
-            echo "<tr><td>${idx}</td><td>${build}</td><td>${passed}</td><td>${failed}</td><td>${skipped}</td>" \
-                 "<td><a href='history/${build}/ubuntu-latest/report.html'>View</a></td>" \
-                 "<td><a href='history/${build}/windows-latest/report.html'>View</a></td></tr>" >> "$INDEX_HTML"
-          done
-          echo "</table>" >> "$INDEX_HTML"
-
-          # Trend chart
-          LABELS=$(jq -r '.[].build' "$SUMMARY_JSON" | paste -sd "," -)
-          PASS_DATA=$(jq -r '.[].data.passed' "$SUMMARY_JSON" | paste -sd "," -)
-          FAIL_DATA=$(jq -r '.[].data.failed' "$SUMMARY_JSON" | paste -sd "," -)
-          SKIPPED_DATA=$(jq -r '.[].data.skipped' "$SUMMARY_JSON" | paste -sd "," -)
-
-          echo "<h2>Trend Chart</h2><canvas id='trendChart' width='800' height='400'></canvas>
-          <script>
-          new Chart(document.getElementById('trendChart').getContext('2d'), {
-            type: 'line',
-            data: {
-              labels: [$LABELS],
-              datasets:[
-                {label:'Passed', data:[$PASS_DATA], borderColor:'green', fill:false},
-                {label:'Failed', data:[$FAIL_DATA], borderColor:'red', fill:false},
-                {label:'Skipped', data:[$SKIPPED_DATA], borderColor:'orange', fill:false}
+          echo "Rebuilding dashboard..."
+          BUILD_TABLE=$(jq -r '
+            ["#", "Build", "Passed", "Failed", "Skipped", "Ubuntu", "Windows"],
+            (to_entries | reverse | map(
+              [.key + 1,
+               .value.build,
+               .value.passed,
+               .value.failed,
+               .value.skipped,
+               (if .value.os == "ubuntu-latest" then "View" else "" end),
+               (if .value.os == "windows-latest" then "View" else "" end)
               ]
-            },
-            options:{responsive:true,plugins:{legend:{position:'top'}},scales:{y:{beginAtZero:true}}}
-          });
-          </script>" >> "$INDEX_HTML"
+            )[]) | @tsv' site/history.json)
 
-          echo "</body></html>" >> "$INDEX_HTML"
-          echo "✅ Dashboard built at $INDEX_HTML"
+          {
+            echo "<html><head><title>Hyperscale SSD Build Dashboard</title></head><body>"
+            echo "<h2>Report History & Trends (Times in PDT)</h2><pre>$BUILD_TABLE</pre>"
+            echo "</body></html>"
+          } > site/index.html
+
+          echo "✅ Dashboard index.html generated."
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ${{ env.SITE_DIR }}
-          publish_branch: gh-pages
+          publish_dir: site
