@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  SITE_DIR: site
+
 jobs:
   test:
     name: Run Behave Tests
@@ -31,14 +34,14 @@ jobs:
           set +e
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
+          if [[ "${{ matrix.os }}" == "Linux" ]]; then
             sudo apt-get update
             sudo apt-get install -y jq
           else
             choco install jq -y || true
           fi
 
-      - name: Run Behave Tests (HTML)
+      - name: Run Behave Tests
         run: |
           echo "Running Behave tests..."
           BUILD_NUMBER=${{ github.run_number }}
@@ -50,7 +53,7 @@ jobs:
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_DIR/report.html" --no-capture || true
 
-          # Ensure summary.json exists
+          # Generate summary.json for this OS
           PASSED=$(grep -o "class=['\"]scenario passed['\"]" "$REPORT_DIR/report.html" | wc -l || echo 0)
           FAILED=$(grep -o "class=['\"]scenario failed['\"]" "$REPORT_DIR/report.html" | wc -l || echo 0)
           SKIPPED=$(grep -o "class=['\"]scenario skipped['\"]" "$REPORT_DIR/report.html" | wc -l || echo 0)
@@ -82,7 +85,7 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Download Current Build Artifacts
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           name: behave-report-ubuntu-latest
@@ -95,50 +98,81 @@ jobs:
       - name: Merge History and Append Current Build
         run: |
           echo "Merging build history..."
-          mkdir -p site/history
+          mkdir -p ${{ env.SITE_DIR }}/history
           BUILD_ID=$(date -u +'%Y%m%d-%H%M%S')
 
           for OS in ubuntu-latest windows-latest; do
-            mkdir -p site/history/$BUILD_ID/$OS
-            cp -r current/$OS/* site/history/$BUILD_ID/$OS/
+            mkdir -p ${{ env.SITE_DIR }}/history/$BUILD_ID/$OS
+            cp -r current/$OS/* ${{ env.SITE_DIR }}/history/$BUILD_ID/$OS/
           done
 
-          SUMMARY_JSON="site/history/summary.json"
-          mkdir -p site/history
-          if [[ ! -f "$SUMMARY_JSON" ]]; then
-            echo "[]" > "$SUMMARY_JSON"
-          fi
+          SUMMARY_JSON="${{ env.SITE_DIR }}/history/summary.json"
+          [[ ! -f "$SUMMARY_JSON" ]] && echo "[]" > "$SUMMARY_JSON"
 
-          # Combine summaries of both OS for this build
-          COMBINED_SUMMARY=$(jq -s '.[0] + .[1]' current/ubuntu-latest/summary.json current/windows-latest/summary.json)
-          jq --slurpfile new <(echo "$COMBINED_SUMMARY") '. + [{"build":"'"$BUILD_ID"'","data":$new[0]}]' "$SUMMARY_JSON" > site/history/tmp.json
-          mv site/history/tmp.json "$SUMMARY_JSON"
+          # Merge summaries safely
+          TMP_COMBINED=$(mktemp)
+          jq -s '.[0] + .[1]' current/ubuntu-latest/summary.json current/windows-latest/summary.json > "$TMP_COMBINED"
+
+          jq --slurpfile new "$TMP_COMBINED" '. + [{"build":"'"$BUILD_ID"'","data":$new[0]}]' "$SUMMARY_JSON" > ${{ env.SITE_DIR }}/history/tmp.json
+          mv ${{ env.SITE_DIR }}/history/tmp.json "$SUMMARY_JSON"
+          rm "$TMP_COMBINED"
+
           echo "✅ summary.json updated:"
           cat "$SUMMARY_JSON"
 
-      - name: Rebuild Dashboard Index
+      - name: Build Dashboard with Trend Chart
         run: |
-          echo "Rebuilding dashboard index..."
-          mkdir -p site
-          SUMMARY_JSON="site/history/summary.json"
+          echo "Building dashboard..."
+          mkdir -p ${{ env.SITE_DIR }}
+          SUMMARY_JSON="${{ env.SITE_DIR }}/history/summary.json"
+          INDEX_HTML="${{ env.SITE_DIR }}/index.html"
 
-          echo "<html><head><meta charset='utf-8'><title>Build History Dashboard</title></head><body>" > site/index.html
-          echo "<h1>📊 Hyperscale SSD Framework CI/CD Build History</h1>" >> site/index.html
-          echo "<table border='1' cellpadding='6'><tr><th>#</th><th>Build</th><th>Passed</th><th>Failed</th><th>Skipped</th><th>Ubuntu Report</th><th>Windows Report</th></tr>" >> site/index.html
+          echo "<html><head><title>Hyperscale SSD Dashboard</title>
+          <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+          <style>body{font-family:sans-serif;margin:20px;}table{border-collapse:collapse;}td,th{padding:6px;border:1px solid #ccc;}</style>
+          </head><body>" > "$INDEX_HTML"
+
+          echo "<h1>📊 Hyperscale SSD Framework CI/CD Build History</h1>" >> "$INDEX_HTML"
+
+          # Table of builds
+          echo "<h2>Builds</h2><table><tr><th>#</th><th>Build</th><th>Passed</th><th>Failed</th><th>Skipped</th><th>Ubuntu</th><th>Windows</th></tr>" >> "$INDEX_HTML"
 
           jq -r 'reverse | to_entries[] | "\(.key+1)|\(.value.build)|\(.value.data.passed)|\(.value.data.failed)|\(.value.data.skipped)"' "$SUMMARY_JSON" |
           while IFS="|" read -r idx build passed failed skipped; do
             echo "<tr><td>${idx}</td><td>${build}</td><td>${passed}</td><td>${failed}</td><td>${skipped}</td>" \
                  "<td><a href='history/${build}/ubuntu-latest/report.html'>View</a></td>" \
-                 "<td><a href='history/${build}/windows-latest/report.html'>View</a></td></tr>" >> site/index.html
+                 "<td><a href='history/${build}/windows-latest/report.html'>View</a></td></tr>" >> "$INDEX_HTML"
           done
+          echo "</table>" >> "$INDEX_HTML"
 
-          echo "</table></body></html>" >> site/index.html
-          echo "✅ Dashboard rebuilt at site/index.html"
+          # Trend chart
+          LABELS=$(jq -r '.[].build' "$SUMMARY_JSON" | paste -sd "," -)
+          PASS_DATA=$(jq -r '.[].data.passed' "$SUMMARY_JSON" | paste -sd "," -)
+          FAIL_DATA=$(jq -r '.[].data.failed' "$SUMMARY_JSON" | paste -sd "," -)
+          SKIPPED_DATA=$(jq -r '.[].data.skipped' "$SUMMARY_JSON" | paste -sd "," -)
+
+          echo "<h2>Trend Chart</h2><canvas id='trendChart' width='800' height='400'></canvas>
+          <script>
+          new Chart(document.getElementById('trendChart').getContext('2d'), {
+            type: 'line',
+            data: {
+              labels: [$LABELS],
+              datasets:[
+                {label:'Passed', data:[$PASS_DATA], borderColor:'green', fill:false},
+                {label:'Failed', data:[$FAIL_DATA], borderColor:'red', fill:false},
+                {label:'Skipped', data:[$SKIPPED_DATA], borderColor:'orange', fill:false}
+              ]
+            },
+            options:{responsive:true,plugins:{legend:{position:'top'}},scales:{y:{beginAtZero:true}}}
+          });
+          </script>" >> "$INDEX_HTML"
+
+          echo "</body></html>" >> "$INDEX_HTML"
+          echo "✅ Dashboard built at $INDEX_HTML"
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: site
+          publish_dir: ${{ env.SITE_DIR }}
           publish_branch: gh-pages
