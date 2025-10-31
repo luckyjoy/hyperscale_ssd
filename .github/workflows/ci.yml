@@ -1,270 +1,106 @@
-name: Hyperscale SSD Framework CI/CD
+name: Hyperscale SSD CI/CD
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
   pages: write
   id-token: write
 
-env:
-  SITE_DIR: site
-
 jobs:
   test:
-    name: Run tests on ${{ matrix.os }}
+    name: Run Behave Tests
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
 
-    outputs:
-      test_outcome: ${{ steps.run_behave_tests.outputs.test_outcome }}
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.11
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.10
 
-      - name: Cache pip dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+    - name: Install dependencies
+      shell: bash
+      run: |
+        set +e
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        if [[ "${{ runner.os }}" == "Linux" ]]; then
+          sudo apt-get update
+          sudo apt-get install -y jq
+        else
+          choco install jq -y || true
+        fi
 
-      - name: Install dependencies
-        shell: bash
-        run: |
-          set +e
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          if [[ "${{ matrix.os }}" == "Linux" ]]; then
-            sudo apt-get update
-            sudo apt-get install -y jq
-          else
-            choco install jq -y || true
-          fi
+    - name: Run Behave tests
+      shell: bash
+      run: |
+        echo "Running Behave tests..."
+        behave -f allure_behave.formatter:AllureFormatter -o reports/allure-results
+        # Extract summary
+        STATS_LINE=$(tail -n5 reports/allure-results/* | grep -E "scenarios passed|steps passed")
+        PASSED=$(echo "$STATS_LINE" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+")
+        FAILED=$(echo "$STATS_LINE" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+")
+        SKIPPED=$(echo "$STATS_LINE" | grep -oE "[0-9]+ skipped" | grep -oE "[0-9]+")
+        mkdir -p reports
+        echo "{ \"build\": ${{ github.run_number }}, \"passed\": $PASSED, \"failed\": $FAILED, \"skipped\": $SKIPPED }" > reports/summary.json
 
-      - name: Run Behave Tests
-        id: run_behave_tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          BUILD_NUMBER=${{ github.run_number }}
-          OS_NAME=${{ matrix.os }}
-          REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
-          mkdir -p "$REPORT_DIR"
+    - name: Upload Allure Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: allure-results-${{ matrix.os }}
+        path: reports/allure-results
 
-          echo ">>> Running behave on $OS_NAME, build $BUILD_NUMBER"
-          behave --tags=@adv --exclude "features/manual_tests" \
-            --format allure_behave.formatter:AllureFormatter \
-            -o "$REPORT_DIR/allure-results" --no-capture | tee "$REPORT_DIR/behave_output.txt" || true
-
-          SUMMARY_LINE=$(tail -n 4 "$REPORT_DIR/behave_output.txt" | grep -E 'scenarios?')
-          echo "Detected stats line: $SUMMARY_LINE"
-
-          PASSED_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*([0-9]+) scenarios? passed.*/\1/' || echo 0)
-          FAILED_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*, ([0-9]+) failed.*/\1/' || echo 0)
-          BROKEN_COUNT=$(echo "$SUMMARY_LINE" | sed -E 's/.*, ([0-9]+) error.*/\1/' || echo 0)
-
-          if [ "$FAILED_COUNT" -gt 0 ] || [ "$BROKEN_COUNT" -gt 0 ]; then
-            RESULT=UNSTABLE
-          else
-            RESULT=PASS
-          fi
-
-          echo "test_outcome=$RESULT" >> $GITHUB_OUTPUT
-
-          # Write summary.json
-          jq -n --argjson p "$PASSED_COUNT" --argjson f "$FAILED_COUNT" --argjson b "$BROKEN_COUNT" \
-            '{statistic: {passed: $p, failed: $f, broken: $b}}' > "$REPORT_DIR/summary.json"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: build-${{ matrix.os }}
-          path: reports/${{ github.run_number }}/${{ matrix.os }}/
-
-  report:
-    name: Generate Reports & Deploy
+  dashboard:
+    name: Generate Dashboard
     runs-on: ubuntu-latest
     needs: test
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v3
 
-      - name: Install JQ
-        run: sudo apt-get update && sudo apt-get install -y jq
+    - name: Download Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: allure-results-ubuntu-latest
+        path: artifacts/behave-output-ubuntu-latest
+    - uses: actions/download-artifact@v4
+      with:
+        name: allure-results-windows-latest
+        path: artifacts/behave-output-windows-latest
 
-      - name: Download Test Results
-        uses: actions/download-artifact@v4
-        with:
-          path: reports
+    - name: Generate Dashboard
+      shell: bash
+      run: python ci/generate_dashboard.py
 
-      - name: Generate Dashboard
-        shell: bash
-        run: |
-          SITE_DIR="${{ env.SITE_DIR }}"
-          mkdir -p "$SITE_DIR/latest"
+    - name: Upload Pages Artifact
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: site
 
-          python3 <<'EOF'
-import json, os, glob
-from pathlib import Path
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
 
-site_dir = Path(os.environ["SITE_DIR"])
-site_dir.mkdir(exist_ok=True)
+    - name: Add Workflow Summary (Badges)
+      shell: bash
+      run: |
+        PAGE_URL=${{ steps.deployment.outputs.page_url }}
+        BASE_URL="${PAGE_URL%/}"
+        TEST_STATUS="UNSTABLE"
+        STATUS_ICON="⚠️"
+        STATUS_TEXT="Some tests failed"
 
-history = []
-
-# Detect all builds
-for build_dir in sorted(site_dir.glob("../reports/*"), key=lambda p: int(p.name)):
-    build_num = int(build_dir.name)
-    build_summary = {"build": build_num, "passed":0, "failed":0, "skipped":0,
-                     "categories":[], "environment":[], "executor":[]}
-
-    for os_dir in build_dir.iterdir():
-        if not os_dir.is_dir(): continue
-        # Summary counts
-        summary_file = os_dir / "summary.json"
-        if summary_file.exists():
-            s = json.load(summary_file)
-            build_summary["passed"] += s["statistic"].get("passed",0)
-            build_summary["failed"] += s["statistic"].get("failed",0)
-            build_summary["skipped"] += s["statistic"].get("broken",0)
-        # Categories from allure
-        for cat_file in glob.glob(str(os_dir / "allure-results" / "categories*.json")):
-            with open(cat_file) as f:
-                categories = json.load(f)
-                build_summary["categories"].extend([c.get("name") for c in categories])
-        # Environment properties
-        env_file = os_dir / "allure-results" / "environment.properties"
-        if os.path.exists(env_file):
-            with open(env_file) as f:
-                build_summary["environment"].extend([l.strip() for l in f if "=" in l])
-        # Executor = OS
-        build_summary["executor"].append(os_dir.name)
-
-    # Deduplicate lists
-    build_summary["categories"] = list(sorted(set(build_summary["categories"])))
-    build_summary["environment"] = list(sorted(set(build_summary["environment"])))
-    build_summary["executor"] = list(sorted(set(build_summary["executor"])))
-
-    history.append(build_summary)
-
-# Save merged history
-with open(site_dir / "history.json", "w") as f:
-    json.dump(history, f, indent=2)
-
-# Generate HTML dashboard
-html_file = site_dir / "index.html"
-
-labels = [h["build"] for h in history]
-passed = [h["passed"] for h in history]
-failed = [h["failed"] for h in history]
-skipped = [h["skipped"] for h in history]
-
-categories = sorted({c for h in history for c in h.get("categories",[])})
-environment = sorted({e for h in history for e in h.get("environment",[])})
-executors = sorted({ex for h in history for ex in h.get("executor",[])})
-
-with open(html_file, "w") as f:
-    f.write(f"""<html>
-<head>
-<title>Hyperscale SSD CI/CD Dashboard</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<style>
-body{{font-family:sans-serif;margin:20px;}}
-ul{{list-style:none;padding:0;}}
-li{{margin:6px 0;}}
-a{{text-decoration:none;color:#0366d6;}}
-a:hover{{text-decoration:underline;}}
-#chart-container{{max-width:800px;margin:0;}}
-</style>
-</head>
-<body>
-<h1>🤖 Hyperscale SSD Framework CI/CD Build History</h1>
-
-<h2>🧩 Latest Reports</h2>
-<ul>
-<li><a href="latest/ubuntu-latest/index.html">Ubuntu Latest</a></li>
-<li><a href="latest/windows-latest/index.html">Windows Latest</a></li>
-</ul>
-
-<h2>📊 Report History & Trends</h2>
-<canvas id='trendChart'></canvas>
-
-<h2>🔖 Categories</h2>
-<ul>{"".join(f"<li>{c}</li>" for c in categories)}</ul>
-
-<h2>🌐 Environment Properties</h2>
-<ul>{"".join(f"<li>{e}</li>" for e in environment)}</ul>
-
-<h2>👤 Executors</h2>
-<ul>{"".join(f"<li>{ex}</li>" for ex in executors)}</ul>
-
-<script>
-const labels = {labels};
-const passed = {passed};
-const failed = {failed};
-const skipped = {skipped};
-const ctx = document.getElementById('trendChart').getContext('2d');
-new Chart(ctx, {{
-    type:'line',
-    data:{{
-        labels: labels,
-        datasets:[
-            {{label:'Passed', data:passed, borderColor:'green', fill:false}},
-            {{label:'Failed', data:failed, borderColor:'red', fill:false}},
-            {{label:'Skipped', data:skipped, borderColor:'orange', fill:false}}
-        ]
-    }},
-    options:{{responsive:true, maintainAspectRatio:false}}
-}});
-</script>
-</body></html>""")
-EOF
-
-      - name: Upload Pages Artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ${{ env.SITE_DIR }}
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-
-      - name: Add Workflow Summary (Badges)
-        run: |
-          PAGE_URL=${{ steps.deployment.outputs.page_url }}
-          BASE_URL="${PAGE_URL%/}"
-          TEST_STATUS=${{ needs.test.outputs.test_outcome }}
-
-          if [[ "$TEST_STATUS" == "FAIL" ]]; then
-            STATUS_ICON="❌"
-            STATUS_TEXT="Failed (setup/config error)"
-          elif [[ "$TEST_STATUS" == "UNSTABLE" ]]; then
-            STATUS_ICON="⚠️"
-            STATUS_TEXT="Unstable (some tests failed)"
-          else
-            STATUS_ICON="✅"
-            STATUS_TEXT="All tests passed"
-          fi
-
-          echo "### 🤖 Hyperscale SSD Framework CI/CD" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[![Ubuntu Latest Report](https://img.shields.io/badge/Ubuntu-Latest_Build-blue)](${BASE_URL}/latest/ubuntu-latest/index.html)" >> $GITHUB_STEP_SUMMARY
-          echo "[![Windows Latest Report](https://img.shields.io/badge/Windows-Latest_Build-blue)](${BASE_URL}/latest/windows-latest/index.html)" >> $GITHUB_STEP_SUMMARY
-          echo "[![Report History](https://img.shields.io/badge/All-Builds-green)](${BASE_URL}/)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Build #${{ github.run_number }} | Status: $STATUS_ICON $STATUS_TEXT" >> $GITHUB_STEP_SUMMARY
+        echo "### 🤖 Hyperscale SSD Framework CI/CD" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "[![Ubuntu Latest Report](https://img.shields.io/badge/Ubuntu-Latest_Build-blue)](${BASE_URL}/latest/ubuntu-latest/index.html)" >> $GITHUB_STEP_SUMMARY
+        echo "[![Windows Latest Report](https://img.shields.io/badge/Windows-Latest_Build-blue)](${BASE_URL}/latest/windows-latest/index.html)" >> $GITHUB_STEP_SUMMARY
+        echo "[![Report History](https://img.shields.io/badge/All-Builds-green)](${BASE_URL}/)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Build #${{ github.run_number }} | Status: $STATUS_ICON $STATUS_TEXT" >> $GITHUB_STEP_SUMMARY
