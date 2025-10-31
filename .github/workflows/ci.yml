@@ -11,7 +11,7 @@ permissions:
   contents: write
   pages: write
   id-token: write
-  
+
 env:
   SITE_DIR: site
 
@@ -54,20 +54,28 @@ jobs:
           REPORT_DIR="reports/$BUILD_NUMBER/$OS_NAME"
           mkdir -p "$REPORT_DIR"
 
+          # Run behave with HTML pretty report
+          BEHAVE_OUTPUT=$(mktemp)
           behave --tags=@adv --exclude "features/manual_tests" \
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
-            -o "$REPORT_DIR/report.html" --no-capture || true
+            -o "$REPORT_DIR/report.html" --no-capture | tee "$BEHAVE_OUTPUT" || true
 
-          # Robust extraction of scenario counts from behave-html-pretty report
-          REPORT_HTML="$REPORT_DIR/report.html"
-          PASSED=$(grep -oP 'class="scenario passed"' "$REPORT_HTML" 2>/dev/null | wc -l || echo 0)
-          FAILED=$(grep -oP 'class="scenario failed"' "$REPORT_HTML" 2>/dev/null | wc -l || echo 0)
-          SKIPPED=$(grep -oP 'class="scenario skipped"' "$REPORT_HTML" 2>/dev/null | wc -l || echo 0)
+          # Parse scenario counts from text output
+          PASSED=$(grep -Po '(\d+) scenarios? passed' "$BEHAVE_OUTPUT" | grep -Po '\d+' | head -1)
+          FAILED=$(grep -Po '(\d+) failed' "$BEHAVE_OUTPUT" | grep -Po '\d+' | head -1)
+          SKIPPED=$(grep -Po '(\d+) skipped' "$BEHAVE_OUTPUT" | grep -Po '\d+' | head -1)
 
+          # Default to 0 if empty
           PASSED=${PASSED:-0}
           FAILED=${FAILED:-0}
           SKIPPED=${SKIPPED:-0}
 
+          # Force numeric
+          PASSED=$((PASSED))
+          FAILED=$((FAILED))
+          SKIPPED=$((SKIPPED))
+
+          # Write summary.json
           jq -n --argjson p "$PASSED" --argjson f "$FAILED" --argjson s "$SKIPPED" \
             '{passed: $p, failed: $f, skipped: $s, timestamp: "'$(date -u +'%Y-%m-%dT%H:%M:%SZ')'"}' \
             > "$REPORT_DIR/summary.json"
