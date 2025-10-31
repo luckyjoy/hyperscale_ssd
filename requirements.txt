@@ -1,5 +1,6 @@
 behave>=1.2.6
-behave-html-pretty-formatter>=1.15.1
+#behave-html-pretty-formatter>=1.15.1
+allure-behave
 psutil>=5.9.0
 pyyaml>=6.0
 jsonschema>=4.18.0
