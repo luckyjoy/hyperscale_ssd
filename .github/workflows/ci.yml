@@ -58,24 +58,21 @@ jobs:
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_DIR/report.html" --no-capture || true
 
-          # Robust summary.json generation
-          PASSED=$(grep -o "class=['\"]scenario passed['\"]" "$REPORT_DIR/report.html" 2>/dev/null | wc -l || echo 0)
-          FAILED=$(grep -o "class=['\"]scenario failed['\"]" "$REPORT_DIR/report.html" 2>/dev/null | wc -l || echo 0)
-          SKIPPED=$(grep -o "class=['\"]scenario skipped['\"]" "$REPORT_DIR/report.html" 2>/dev/null | wc -l || echo 0)
+          # Robust extraction of scenario counts from behave-html-pretty report
+          REPORT_HTML="$REPORT_DIR/report.html"
+          PASSED=$(grep -oP 'class="scenario passed"' "$REPORT_HTML" 2>/dev/null | wc -l || echo 0)
+          FAILED=$(grep -oP 'class="scenario failed"' "$REPORT_HTML" 2>/dev/null | wc -l || echo 0)
+          SKIPPED=$(grep -oP 'class="scenario skipped"' "$REPORT_HTML" 2>/dev/null | wc -l || echo 0)
 
           PASSED=${PASSED:-0}
           FAILED=${FAILED:-0}
           SKIPPED=${SKIPPED:-0}
 
-          if ! [[ "$PASSED" =~ ^[0-9]+$ ]]; then PASSED=0; fi
-          if ! [[ "$FAILED" =~ ^[0-9]+$ ]]; then FAILED=0; fi
-          if ! [[ "$SKIPPED" =~ ^[0-9]+$ ]]; then SKIPPED=0; fi
-
           jq -n --argjson p "$PASSED" --argjson f "$FAILED" --argjson s "$SKIPPED" \
             '{passed: $p, failed: $f, skipped: $s, timestamp: "'$(date -u +'%Y-%m-%dT%H:%M:%SZ')'"}' \
             > "$REPORT_DIR/summary.json"
 
-          echo "✅ summary.json generated at $REPORT_DIR"
+          echo "✅ summary.json generated at $REPORT_DIR:"
           cat "$REPORT_DIR/summary.json"
 
       - name: Upload Artifacts
