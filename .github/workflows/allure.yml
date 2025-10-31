@@ -46,10 +46,11 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Install dependencies
+        shell: bash
         run: |
+          echo "Install dependencies on $OS_NAME..."
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install allure-behave  # ensure Allure formatter is installed
 
       - name: Run tests
         id: run_tests
@@ -62,7 +63,7 @@ jobs:
 
           echo "Running Behave tests on $OS_NAME..."
           TEST_EXIT_CODE=0
-          behave --tags=@adv --exclude "features/manual_tests" \
+          behave --tags=@all --exclude "features/manual_tests" \
             --format allure_behave.formatter:AllureFormatter \
             -o "$RESULTS_DIR" --no-capture | tee "$RESULTS_DIR/behave.log" || TEST_EXIT_CODE=$?
 
