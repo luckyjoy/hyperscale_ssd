@@ -45,17 +45,20 @@ jobs:
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_DIR/report.html" --no-capture | tee "$BEHAVE_OUTPUT" || true
 
-          STATS_LINE=$(grep -E 'scenarios?' "$BEHAVE_OUTPUT" | tail -1)
+          STATS_LINE=$(grep -E "scenarios?" "$BEHAVE_OUTPUT" | tail -1)
           echo "Detected stats line: $STATS_LINE"
 
-          PASSED=$(echo "$STATS_LINE" | grep -Po '(\d+)\s+scenarios?\s+passed' | grep -Po '\d+' | head -1)
-          FAILED=$(echo "$STATS_LINE" | grep -Po '(\d+)\s+failed' | grep -Po '\d+' | head -1)
-          SKIPPED=$(echo "$STATS_LINE" | grep -Po '(\d+)\s+skipped' | grep -Po '\d+' | head -1)
+          # Safe extraction using awk (works on Windows + Linux)
+          PASSED=$(echo "$STATS_LINE" | awk '{for(i=1;i<=NF;i++){if($i=="scenarios"&&$(i+1)=="passed,"){print $(i-1)}}}' )
+          FAILED=$(echo "$STATS_LINE" | awk '{for(i=1;i<=NF;i++){if($i=="failed,"){print $(i-1)}}}' )
+          SKIPPED=$(echo "$STATS_LINE" | awk '{for(i=1;i<=NF;i++){if($i=="skipped"){print $(i-1)}}}' )
 
+          # Defaults to 0 if missing or empty
           PASSED=${PASSED:-0}
           FAILED=${FAILED:-0}
           SKIPPED=${SKIPPED:-0}
 
+          # Force numeric conversion
           PASSED=$((PASSED))
           FAILED=$((FAILED))
           SKIPPED=$((SKIPPED))
