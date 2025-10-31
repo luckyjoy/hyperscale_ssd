@@ -5,6 +5,11 @@ on:
     branches: [ main ]
   pull_request:
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  
 jobs:
   build:
     name: Run Behave Tests on ${{ matrix.os }}
@@ -97,9 +102,9 @@ jobs:
           CURRENT_SUMMARY=$(find history -name summary.json -type f)
 
           if [[ -f site/history.json ]]; then
-            jq -s 'add' site/history.json $CURRENT_SUMMARY > site/merged.json
+            jq -s '.[0] + .[1]' site/history.json <(jq -s 'flatten' $CURRENT_SUMMARY) > site/merged.json 2>/dev/null || jq -s 'add | .[0]' $CURRENT_SUMMARY > site/merged.json
           else
-            jq -s 'add' $CURRENT_SUMMARY > site/merged.json
+            jq -s '.' $CURRENT_SUMMARY > site/merged.json
           fi
 
           mv site/merged.json site/history.json
