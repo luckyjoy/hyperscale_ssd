@@ -7,11 +7,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pages: write
-  id-token: write
-  
 env:
   SITE_DIR: site
 
@@ -63,12 +58,16 @@ jobs:
           FAILED=$(grep -o "class=['\"]scenario failed['\"]" "$REPORT_DIR/report.html" | wc -l || echo 0)
           SKIPPED=$(grep -o "class=['\"]scenario skipped['\"]" "$REPORT_DIR/report.html" | wc -l || echo 0)
 
+          PASSED=${PASSED:-0}
+          FAILED=${FAILED:-0}
+          SKIPPED=${SKIPPED:-0}
+
           jq -n --argjson p "$PASSED" --argjson f "$FAILED" --argjson s "$SKIPPED" \
             '{passed: $p, failed: $f, skipped: $s, timestamp: "'$(date -u +'%Y-%m-%dT%H:%M:%SZ')'"}' \
             > "$REPORT_DIR/summary.json"
 
-          echo "✅ Report generated at $REPORT_DIR"
-          echo "PASSED=$PASSED, FAILED=$FAILED, SKIPPED=$SKIPPED"
+          echo "✅ summary.json generated at $REPORT_DIR"
+          cat "$REPORT_DIR/summary.json"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
@@ -113,7 +112,7 @@ jobs:
             cp -r current/$OS/* "$HISTORY_DIR/$BUILD_ID/$OS/"
           done
 
-          # Ensure summary.json exists
+          # Ensure history.json exists
           HISTORY_JSON="$HISTORY_DIR/summary.json"
           [[ ! -f "$HISTORY_JSON" ]] && echo "[]" > "$HISTORY_JSON"
 
