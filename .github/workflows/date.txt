@@ -7,6 +7,11 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  
 env:
   SITE_DIR: site
 
@@ -62,6 +67,7 @@ jobs:
           FAILED=${FAILED:-0}
           SKIPPED=${SKIPPED:-0}
 
+          # Ensure numeric values
           if ! [[ "$PASSED" =~ ^[0-9]+$ ]]; then PASSED=0; fi
           if ! [[ "$FAILED" =~ ^[0-9]+$ ]]; then FAILED=0; fi
           if ! [[ "$SKIPPED" =~ ^[0-9]+$ ]]; then SKIPPED=0; fi
@@ -108,7 +114,7 @@ jobs:
           echo "Merging build history..."
           HISTORY_DIR=${{ env.SITE_DIR }}/history
           mkdir -p "$HISTORY_DIR"
-          BUILD_ID=${{ github.run_number }}
+          BUILD_ID=$(date -u +'%Y%m%d-%H%M%S')
 
           # Copy OS reports
           for OS in ubuntu-latest windows-latest; do
