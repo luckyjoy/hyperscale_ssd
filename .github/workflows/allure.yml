@@ -10,8 +10,7 @@ permissions:
   contents: write
   pages: write
   id-token: write
-  actions: read # Needed to list workflow runs and find the artifact
-  workflows: read # Needed to read workflow details for artifact search
+  actions: read # This is the correct permission for dawidd6/action-download-artifact@v6
 
 env:
   ALLURE_VERSION: 2.29.0
