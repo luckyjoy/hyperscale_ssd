@@ -10,6 +10,8 @@ permissions:
   contents: write
   pages: write
   id-token: write
+  actions: read # Needed to list workflow runs and find the artifact
+  workflows: read # Needed to read workflow details for artifact search
 
 env:
   ALLURE_VERSION: 2.29.0
