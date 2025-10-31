@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -28,27 +29,73 @@ jobs:
       test_outcome: ${{ steps.run_tests.outputs.test_outcome }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: 3.11
-
-      - name: Cache pip dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install allure-behave
+          pip install allure-behave jq
+
+      - name: Prepare support files (categories + env props)
+        shell: bash
+        run: |
+          mkdir -p supports
+          # categories.json (user-provided)
+          cat > supports/categories.json <<'JSON'
+[
+  {
+    "name": "SSD Performance Failures ⏱️",
+    "messageRegex": ".*(throughput|latency|IOPS|scale|slow).*exceed.*",
+    "matchedStatuses": ["failed"]
+  },
+  {
+    "name": "SSD Integrity/Resilience Issues 🛡️",
+    "messageRegex": ".*(corruption|error|fail|unplug|reset|reallocated|zero).*detect.*",
+    "matchedStatuses": ["failed"]
+  },
+  {
+    "name": "Configuration/Environment Problem ⚙️",
+    "messageRegex": ".*(VM|NVMe|FIO|setup).*fail|cannot.*launch.*|Behave.*Error.*",
+    "matchedStatuses": ["failed"]
+  },
+  {
+    "name": "Untested Requirement/Skipped Test 🚧",
+    "messageRegex": ".*(skip|untested|not implemented).*",
+    "matchedStatuses": ["skipped"]
+  }
+]
+JSON
+
+          # ubuntu.properties
+          cat > supports/ubuntu.properties <<'PROP'
+OS=Ubuntu 22.04 LTS
+Kernel=6.5.0-generic
+VM_Type=KVM/QEMU
+SSD_Interface=NVMe
+Test_Runner=Behave (Python BDD)
+Report_Framework=Allure
+FIO_Version=3.33
+HyperScale_Configuration=Dedicated_VMs_and_Shared_SSD_Scenarios
+PROP
+
+          # windows.properties
+          cat > supports/windows.properties <<'PROP'
+OS=Windows Server 2025
+Hypervisor=Hyper-V
+VM_Type=Windows_VM
+SSD_Interface=NVMe
+Test_Runner=Behave (Python BDD)
+Report_Framework=Allure
+IO_Tool=DiskSpd/FIO_on_WSL
+HyperScale_Configuration=Dedicated_VMs_and_Shared_SSD_Scenarios
+PROP
 
       - name: Run tests
         id: run_tests
@@ -56,7 +103,7 @@ jobs:
         run: |
           set +e
           OS_NAME=${{ matrix.os }}
-          RESULTS_DIR="allure-results/$OS_NAME"
+          RESULTS_DIR="allure-results/allure-results-${OS_NAME}"
           mkdir -p "$RESULTS_DIR"
 
           echo "Running Behave tests on $OS_NAME..."
@@ -65,28 +112,29 @@ jobs:
             --format allure_behave.formatter:AllureFormatter \
             -o "$RESULTS_DIR" --no-capture | tee "$RESULTS_DIR/behave.log" || TEST_EXIT_CODE=$?
 
-          JSON_COUNT=$(find "$RESULTS_DIR" -type f -name "*.json" | wc -l)
+          # validate Allure JSON presence
+          JSON_COUNT=$(find "$RESULTS_DIR" -type f -name "*.json" | wc -l || echo 0)
           if [ "$JSON_COUNT" -eq 0 ]; then
             echo "❌ No Allure results found — setup/configuration failure."
             echo "test_outcome=FAIL" >> $GITHUB_OUTPUT
             exit 1
           fi
 
+          # PASS / UNSTABLE / FAIL policy
           if [ $TEST_EXIT_CODE -ne 0 ]; then
-            echo "⚠️ Some tests failed (Behave exit code $TEST_EXIT_CODE)."
+            # If test run produced results but exit code non-zero => UNSTABLE
             echo "test_outcome=UNSTABLE" >> $GITHUB_OUTPUT
             exit 0
           else
-            echo "✅ All tests passed successfully."
             echo "test_outcome=PASS" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-      - name: Upload Allure Results Artifact
+      - name: Upload allure-results artifact
         uses: actions/upload-artifact@v4
         with:
           name: allure-results-${{ matrix.os }}
-          path: allure-results/${{ matrix.os }}
+          path: allure-results/allure-results-${{ matrix.os }}
 
   report:
     name: Generate Allure Reports & Deploy
@@ -94,14 +142,14 @@ jobs:
     needs: test
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Get workflow filename
+      - name: Get workflow filename (for artifact download)
         id: get_workflow_name
         run: echo "WORKFLOW_FILE=$(basename .github/workflows/*.yml)" >> $GITHUB_ENV
 
-      - name: Download previous Allure history artifact
+      - name: Download previous Allure history artifact (if any)
         uses: dawidd6/action-download-artifact@v6
         with:
           workflow: ${{ env.WORKFLOW_FILE }}
@@ -110,16 +158,19 @@ jobs:
           path: previous-site
           if_no_artifact_found: ignore
 
-      - name: Restore Allure History
+      - name: Restore previous site/history (if present)
         run: |
           mkdir -p "${{ env.SITE_DIR }}"
-          if [ -d "previous-site" ]; then
+          if [ -d previous-site ]; then
             cp -r previous-site/* "${{ env.SITE_DIR }}/" || true
           fi
 
+      - name: Install jq (for JSON handling)
+        run: sudo apt-get update && sudo apt-get install -y jq
+
       - name: Download Allure CLI
         run: |
-          wget https://github.com/allure-framework/allure2/releases/download/${{ env.ALLURE_VERSION }}/allure-${{ env.ALLURE_VERSION }}.tgz
+          wget -q https://github.com/allure-framework/allure2/releases/download/${{ env.ALLURE_VERSION }}/allure-${{ env.ALLURE_VERSION }}.tgz
           tar -xzf allure-${{ env.ALLURE_VERSION }}.tgz
           mv allure-${{ env.ALLURE_VERSION }} allure-commandline
           echo "$(pwd)/allure-commandline/bin" >> $GITHUB_PATH
@@ -129,51 +180,308 @@ jobs:
         with:
           path: allure-results
 
-      - name: Generate Allure Reports Per OS
+      - name: Generate Allure Reports per OS and attach metadata
         shell: bash
         run: |
           SITE_DIR="${{ env.SITE_DIR }}"
           BUILD_NUMBER=${{ github.run_number }}
           mkdir -p "$SITE_DIR/latest"
 
+          # For each OS, the runner uploaded artifact name is allure-results-<OS>
           for OS in ubuntu-latest windows-latest; do
-            RESULTS_DIR="allure-results/allure-results-$OS"
+            SRC_DIR="allure-results/allure-results-${OS}"
             REPORT_DIR_BUILD="$SITE_DIR/$BUILD_NUMBER/$OS"
             REPORT_DIR_LATEST="$SITE_DIR/latest/$OS"
-            mkdir -p "$RESULTS_DIR" "$REPORT_DIR_BUILD" "$REPORT_DIR_LATEST"
+            mkdir -p "$SRC_DIR" "$REPORT_DIR_BUILD" "$REPORT_DIR_LATEST"
 
-            if [ -d "site/latest/$OS/history" ]; then
-              mkdir -p "$RESULTS_DIR/history"
-              cp -r "site/latest/$OS/history/"* "$RESULTS_DIR/history/" || true
+            # If supports files exist in repo, copy into results so Allure shows them
+            if [ -f "supports/categories.json" ]; then
+              cp supports/categories.json "$SRC_DIR/categories.json" 2>/dev/null || true
+            fi
+            if [ -f "supports/${OS/ubuntu-latest/ubuntu}.properties" ]; then
+              cp "supports/${OS/ubuntu-latest/ubuntu}.properties" "$SRC_DIR/environment.properties" 2>/dev/null || true
             fi
 
-            cp supports/${OS/ubuntu-latest/ubuntu}.properties "$RESULTS_DIR/environment.properties" 2>/dev/null || true
-            cp supports/categories.json "$RESULTS_DIR/categories.json" 2>/dev/null || true
+            # Create executor.json (filled from template values)
+            jq -n --arg name "Hyperscale SSD Framework Runner" \
+                  --arg type "CI_Pipeline" \
+                  --arg url "https://github.com/${GITHUB_REPOSITORY}/actions/" \
+                  --arg buildOrder "${BUILD_NUMBER}" \
+                  --arg buildName "Hyperscale SSD #${BUILD_NUMBER}" \
+                  --arg buildUrl "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+                  --arg reportUrl "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY##*/}/latest/${OS}/" \
+                  --arg desc "Executed Behave/Allure tests for SSD Hyperscale and Resilience validation." \
+                  --argjson data '{"Product Model": "Hyperscale SSD V029", "Test Framework":"Gherkin (Behave)"}' \
+                  '{name:$name,type:$type,url:$url,buildOrder:$buildOrder,buildName:$buildName,buildUrl:$buildUrl,reportUrl:$reportUrl,description:$desc,data:$data}' \
+              > "$SRC_DIR/executor.json" 2>/dev/null || true
 
-            REPO_NAME="${GITHUB_REPOSITORY##*/}"
-            echo "{\"name\":\"$OS\",\"type\":\"GitHub Actions\",\"url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\",\"reportUrl\":\"https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/latest/$OS/\",\"buildOrder\":\"${BUILD_NUMBER}\",\"buildName\":\"Build ${BUILD_NUMBER} ($OS)\",\"buildUrl\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" > "$RESULTS_DIR/executor.json"
-
-            allure generate "$RESULTS_DIR" -o "$REPORT_DIR_BUILD" --clean
-            cp -r "$REPORT_DIR_BUILD"/* "$REPORT_DIR_LATEST/" || true
-            date -u > "$REPORT_DIR_BUILD/build-info.txt"
-            date -u > "$REPORT_DIR_LATEST/build-info.txt"
+            # Generate Allure HTML report for this OS
+            if [ -d "$SRC_DIR" ] && [ -n "$(find "$SRC_DIR" -type f -name '*.json' 2>/dev/null)" ]; then
+              allure generate "$SRC_DIR" -o "$REPORT_DIR_BUILD" --clean || true
+              cp -r "$REPORT_DIR_BUILD"/* "$REPORT_DIR_LATEST/" || true
+              date -u > "$REPORT_DIR_BUILD/build-info.txt"
+              date -u > "$REPORT_DIR_LATEST/build-info.txt"
+            fi
           done
 
-      - name: Fix Allure Paths
+      - name: Fix Allure HTML absolute paths (make them relative)
         shell: bash
         run: |
-          find site -type f \( -path "*/latest/*" -o -path "*/${{ github.run_number }}/*" \) -name 'index.html' | while read FILE_PATH; do
-            perl -pi -e 's|src="/|src="./|g' "$FILE_PATH"
-            perl -pi -e 's|href="/|href="./|g' "$FILE_PATH"
+          find site -type f -name 'index.html' | while read FILE; do
+            perl -pi -e 's|src="/|src="./|g' "$FILE"
+            perl -pi -e 's|href="/|href="./|g' "$FILE"
           done
 
-      - name: Rebuild index.html with Trend Charts
+      - name: Build root index.html (history, table, chart, categories, executors)
         shell: bash
         run: |
-          # This step dynamically generates categories, environment properties, executors and trend chart
-          # ... (Use the same script you already have for building index.html) ...
+          SITE_DIR="site"
+          INDEX="$SITE_DIR/index.html"
+          mkdir -p "$SITE_DIR"
+          CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
 
-      - name: Upload Pages Artifact
+          # Start HTML
+          cat > "$INDEX" <<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hyperscale SSD Allure History</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body{font-family:Arial,Helvetica,sans-serif;margin:20px;color:#111}
+table{border-collapse:collapse;width:100%;margin-top:12px}
+th,td{border:1px solid #ddd;padding:8px;text-align:left}
+th{background:#f4f4f4}
+.status-pass{color:green;font-weight:700}
+.status-unstable{color:orange;font-weight:700}
+.status-fail{color:red;font-weight:700}
+#chart-container{max-width:900px;height:300px;margin-top:18px}
+.filter-row{margin-top:8px}
+</style>
+</head>
+<body>
+<h1>🤖 Hyperscale SSD — Allure Build History</h1>
+
+<h2>Latest Reports</h2>
+<ul>
+HTML
+
+          # Latest report links
+          for OS in ubuntu-latest windows-latest; do
+            if [ -d "$SITE_DIR/latest/$OS" ]; then
+              TS=$(cat "$SITE_DIR/latest/$OS/build-info.txt" 2>/dev/null || echo "")
+              TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "$TS")
+              echo "<li><a href='latest/$OS/'>Latest $OS Report</a> — Last run: $TS_DISPLAY</li>" >> "$INDEX"
+            fi
+          done
+
+          cat >> "$INDEX" <<'HTML'
+</ul>
+
+<h2>Build Summary (table)</h2>
+
+<div class="filter-row">
+  <label><input type="checkbox" id="showUbuntu" checked> Show Ubuntu</label>
+  <label style="margin-left:12px;"><input type="checkbox" id="showWindows" checked> Show Windows</label>
+  <label style="margin-left:12px;"><input type="checkbox" id="showPass" checked> Show PASS</label>
+  <label style="margin-left:12px;"><input type="checkbox" id="showUnstable" checked> Show UNSTABLE</label>
+  <label style="margin-left:12px;"><input type="checkbox" id="showFail" checked> Show FAIL</label>
+</div>
+
+<table id="historyTable" aria-live="polite">
+<thead><tr>
+<th>Build</th><th>OS</th><th>Timestamp (PDT)</th><th>Status</th><th>Environment</th><th>Executor</th><th>Categories</th><th>Passed</th><th>Failed</th><th>Broken</th><th>Report</th>
+</tr></thead>
+<tbody>
+HTML
+
+          # iterate builds newest-first and also collect chart arrays (oldest->newest)
+          BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -n)
+          LABELS=""
+          PASS_DATA=""
+          FAIL_DATA=""
+          UNSTABLE_DATA=""
+
+          for BUILD in $BUILDS; do
+            for OS in ubuntu-latest windows-latest; do
+              SUMMARY="$SITE_DIR/$BUILD/$OS/widgets/summary.json"
+              ENV_FILE="$SITE_DIR/$BUILD/$OS/environment.properties"
+              EXEC_FILE="$SITE_DIR/$BUILD/$OS/executor.json"
+              REPORT_LINK="$BUILD/$OS/index.html"
+              # default values
+              P=0; F=0; B=0; STATUS_TEXT="N/A"
+              if [ -f "$SUMMARY" ]; then
+                P=$(jq -r '.statistic.passed // 0' "$SUMMARY" 2>/dev/null || echo 0)
+                F=$(jq -r '.statistic.failed // 0' "$SUMMARY" 2>/dev/null || echo 0)
+                B=$(jq -r '.statistic.broken // 0' "$SUMMARY" 2>/dev/null || echo 0)
+                # determine status per build/OS
+                if [ "$F" -gt 0 ] || [ "$B" -gt 0 ]; then
+                  STATUS_TEXT="UNSTABLE"
+                else
+                  STATUS_TEXT="PASS"
+                fi
+              else
+                # If no summary but index exists, mark FAIL (report missing)
+                if [ -d "$SITE_DIR/$BUILD/$OS" ]; then
+                  STATUS_TEXT="FAIL"
+                fi
+              fi
+
+              # timestamp
+              TS="N/A"
+              if [ -f "$SITE_DIR/$BUILD/$OS/build-info.txt" ]; then
+                TS_RAW=$(cat "$SITE_DIR/$BUILD/$OS/build-info.txt")
+                TS=$(TZ='America/Los_Angeles' date -d "$TS_RAW" '+%Y-%m-%d %H:%M:%S PDT' 2>/dev/null || echo "$TS_RAW")
+              fi
+
+              # read environment.props into HTML-friendly string
+              ENV_HTML="—"
+              if [ -f "$ENV_FILE" ]; then
+                ENV_HTML=$(awk '{printf "%s<br>", $0}' "$ENV_FILE" | sed 's/$/<\/br>/g' | sed ':a;N;$!ba;s/\n/<br>/g')
+                # simplified: fallback to join lines
+                ENV_HTML=$(tr '\n' '<br>' < "$ENV_FILE" | sed 's/<br>$//')
+              fi
+
+              # executor info
+              EXEC_HTML="—"
+              if [ -f "$EXEC_FILE" ]; then
+                NAME=$(jq -r '.name // ""' "$EXEC_FILE" 2>/dev/null)
+                BUILDNAME=$(jq -r '.buildName // ""' "$EXEC_FILE" 2>/dev/null)
+                REPORTURL=$(jq -r '.reportUrl // ""' "$EXEC_FILE" 2>/dev/null)
+                EXEC_HTML="$(echo "$NAME")<br>${BUILDNAME}"
+              fi
+
+              # categories (if categories.json exists inside allure-results or in widgets)
+              CATS="—"
+              # try Allure widgets category file (categories.json) first
+              if [ -f "$SITE_DIR/$BUILD/$OS/categories.json" ]; then
+                CATS=$(jq -r '.[].name' "$SITE_DIR/$BUILD/$OS/categories.json" 2>/dev/null | paste -sd ", " - || echo "—")
+              elif [ -f "$SITE_DIR/$BUILD/$OS/widgets/categories.json" ]; then
+                CATS=$(jq -r '.[].name' "$SITE_DIR/$BUILD/$OS/widgets/categories.json" 2>/dev/null | paste -sd ", " - || echo "—")
+             fi
+
+              # append table row
+              # escape values for HTML
+              SAFE_ENV=$(echo "$ENV_HTML" | sed 's/"/&#34;/g')
+              SAFE_EXEC=$(echo "$EXEC_HTML" | sed 's/"/&#34;/g')
+              echo "<tr data-build=\"$BUILD\" data-os=\"$OS\" data-status=\"$STATUS_TEXT\">
+<td><a href=\"$REPORT_LINK\">$BUILD</a></td>
+<td>$OS</td>
+<td>$TS</td>
+<td>" >> "$INDEX"
+
+              if [ "$STATUS_TEXT" = "PASS" ]; then
+                echo "<span class=\"status-pass\">✅ PASS</span>" >> "$INDEX"
+              elif [ "$STATUS_TEXT" = "UNSTABLE" ]; then
+                echo "<span class=\"status-unstable\">⚠️ UNSTABLE</span>" >> "$INDEX"
+              else
+                echo "<span class=\"status-fail\">❌ FAIL</span>" >> "$INDEX"
+              fi
+
+              echo "</td>
+<td>$SAFE_ENV</td>
+<td>$SAFE_EXEC</td>
+<td>$CATS</td>
+<td>$P</td>
+<td>$F</td>
+<td>$B</td>
+<td><a href=\"$REPORT_LINK\">View</a></td>
+</tr>" >> "$INDEX"
+
+              # chart arrays (we want oldest->newest, so build arrays after loop; we will keep order as BUILDS sorted ascending)
+            done
+          done
+
+          # Build chart arrays (oldest to newest)
+          LABELS=""
+          PASS_DATA=""
+          FAIL_DATA=""
+          UNSTABLE_DATA=""
+          for BUILD in $BUILDS; do
+            TOTAL_P=0; TOTAL_F=0; TOTAL_U=0
+            for OS in ubuntu-latest windows-latest; do
+              SUMMARY="$SITE_DIR/$BUILD/$OS/widgets/summary.json"
+              if [ -f "$SUMMARY" ]; then
+                p=$(jq -r '.statistic.passed // 0' "$SUMMARY" 2>/dev/null || echo 0)
+                f=$(jq -r '.statistic.failed // 0' "$SUMMARY" 2>/dev/null || echo 0)
+                u=$(jq -r '.statistic.broken // 0' "$SUMMARY" 2>/dev/null || echo 0)
+                TOTAL_P=$((TOTAL_P + p))
+                TOTAL_F=$((TOTAL_F + f))
+                TOTAL_U=$((TOTAL_U + u))
+              fi
+            done
+            LABELS="$LABELS'$BUILD',"
+            PASS_DATA="$PASS_DATA$TOTAL_P,"
+            FAIL_DATA="$FAIL_DATA$TOTAL_F,"
+            UNSTABLE_DATA="$UNSTABLE_DATA$TOTAL_U,"
+          done
+
+          # Close table and add chart container
+          cat >> "$INDEX" <<HTML
+</tbody>
+</table>
+
+<div id="chart-container">
+<canvas id="trendChart"></canvas>
+</div>
+
+<script>
+function applyFilters(){
+  const showUbuntu = document.getElementById('showUbuntu').checked;
+  const showWindows = document.getElementById('showWindows').checked;
+  const showPass = document.getElementById('showPass').checked;
+  const showUnstable = document.getElementById('showUnstable').checked;
+  const showFail = document.getElementById('showFail').checked;
+
+  document.querySelectorAll('#historyTable tbody tr').forEach(function(tr){
+    const os = tr.getAttribute('data-os');
+    const status = tr.getAttribute('data-status');
+    let visible = true;
+    if (!showUbuntu && os === 'ubuntu-latest') visible = false;
+    if (!showWindows && os === 'windows-latest') visible = false;
+    if (!showPass && status === 'PASS') visible = false;
+    if (!showUnstable && status === 'UNSTABLE') visible = false;
+    if (!showFail && status === 'FAIL') visible = false;
+    tr.style.display = visible ? '' : 'none';
+  });
+}
+document.getElementById('showUbuntu').addEventListener('change', applyFilters);
+document.getElementById('showWindows').addEventListener('change', applyFilters);
+document.getElementById('showPass').addEventListener('change', applyFilters);
+document.getElementById('showUnstable').addEventListener('change', applyFilters);
+document.getElementById('showFail').addEventListener('change', applyFilters);
+
+const ctx = document.getElementById('trendChart').getContext('2d');
+new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: [${LABELS%,}],
+    datasets: [
+      { label: 'PASS', data: [${PASS_DATA%,}], borderColor: 'green', fill: false },
+      { label: 'FAIL', data: [${FAIL_DATA%,}], borderColor: 'red', fill: false },
+      { label: 'UNSTABLE', data: [${UNSTABLE_DATA%,}], borderColor: 'orange', fill: false }
+    ]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { position: 'top' } },
+    scales: {
+      y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: 'Number' } },
+      x: { title: { display: true, text: 'Build Number' } }
+    }
+  }
+});
+</script>
+
+<hr>
+<p><em>Generated: ${CURRENT_LA_TIME}</em></p>
+</body>
+</html>
+HTML
+
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ${{ env.SITE_DIR }}
@@ -182,7 +490,7 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Upload Allure History Artifact
+      - name: Upload Allure history artifact
         uses: actions/upload-artifact@v4
         with:
           name: allure-history
