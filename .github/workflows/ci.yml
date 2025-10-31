@@ -53,14 +53,19 @@ jobs:
             --format behave_html_pretty_formatter:PrettyHTMLFormatter \
             -o "$REPORT_DIR/report.html" --no-capture || true
 
-          # Generate summary.json safely
-          PASSED=$(grep -o "class=['\"]scenario passed['\"]" "$REPORT_DIR/report.html" | wc -l || echo 0)
-          FAILED=$(grep -o "class=['\"]scenario failed['\"]" "$REPORT_DIR/report.html" | wc -l || echo 0)
-          SKIPPED=$(grep -o "class=['\"]scenario skipped['\"]" "$REPORT_DIR/report.html" | wc -l || echo 0)
+          # Robust summary.json generation
+          PASSED=$(grep -o "class=['\"]scenario passed['\"]" "$REPORT_DIR/report.html" 2>/dev/null | wc -l || echo 0)
+          FAILED=$(grep -o "class=['\"]scenario failed['\"]" "$REPORT_DIR/report.html" 2>/dev/null | wc -l || echo 0)
+          SKIPPED=$(grep -o "class=['\"]scenario skipped['\"]" "$REPORT_DIR/report.html" 2>/dev/null | wc -l || echo 0)
 
           PASSED=${PASSED:-0}
           FAILED=${FAILED:-0}
           SKIPPED=${SKIPPED:-0}
+
+          # Ensure numeric values
+          if ! [[ "$PASSED" =~ ^[0-9]+$ ]]; then PASSED=0; fi
+          if ! [[ "$FAILED" =~ ^[0-9]+$ ]]; then FAILED=0; fi
+          if ! [[ "$SKIPPED" =~ ^[0-9]+$ ]]; then SKIPPED=0; fi
 
           jq -n --argjson p "$PASSED" --argjson f "$FAILED" --argjson s "$SKIPPED" \
             '{passed: $p, failed: $f, skipped: $s, timestamp: "'$(date -u +'%Y-%m-%dT%H:%M:%SZ')'"}' \
@@ -117,13 +122,15 @@ jobs:
           [[ ! -f "$HISTORY_JSON" ]] && echo "[]" > "$HISTORY_JSON"
 
           # Combine Ubuntu + Windows summaries safely
-          TMP_COMBINED=$(mktemp)
-          jq -s '.[0] + .[1]' current/ubuntu-latest/summary.json current/windows-latest/summary.json > "$TMP_COMBINED"
+          TMP_JSON=$(mktemp)
+          jq -n --slurpfile u current/ubuntu-latest/summary.json --slurpfile w current/windows-latest/summary.json \
+            '{"passed": ($u[0].passed + $w[0].passed), "failed": ($u[0].failed + $w[0].failed), "skipped": ($u[0].skipped + $w[0].skipped), "timestamp": "'$(date -u +'%Y-%m-%dT%H:%M:%SZ')'"}' \
+            > "$TMP_JSON"
 
-          # Append combined summary to history
-          jq --slurpfile new "$TMP_COMBINED" '. + [{"build":"'"$BUILD_ID"'","data":$new[0]}]' "$HISTORY_JSON" > "$HISTORY_DIR/tmp.json"
+          # Append to history
+          jq --slurpfile new "$TMP_JSON" '. + [{"build":"'"$BUILD_ID"'","data":$new[0]}]' "$HISTORY_JSON" > "$HISTORY_DIR/tmp.json"
           mv "$HISTORY_DIR/tmp.json" "$HISTORY_JSON"
-          rm "$TMP_COMBINED"
+          rm "$TMP_JSON"
 
           echo "✅ History updated:"
           cat "$HISTORY_JSON"
