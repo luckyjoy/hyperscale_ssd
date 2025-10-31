@@ -18,6 +18,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
 
+    outputs:
+      test_outcome: ${{ steps.behave.outputs.test_outcome }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -42,11 +45,11 @@ jobs:
           echo "Running Behave tests..."
           behave --no-capture | tee behave_output.txt || true
 
-          echo "Detecting last stats line..."
+          echo "Extracting last stats line..."
           tail -n 20 behave_output.txt | grep -E "scenarios.*(passed|failed|error|skipped)" | tee stats_line.txt || true
           echo "Detected stats line:" && cat stats_line.txt || true
 
-          # Determine status (PASS / UNSTABLE / FAIL)
+          # Determine status
           if grep -q "error" behave_output.txt; then
             STATUS="FAIL"
           elif grep -q "scenarios failed" behave_output.txt; then
@@ -56,7 +59,8 @@ jobs:
           fi
 
           echo "STATUS=$STATUS" >> $GITHUB_ENV
-          echo "✅ Build status determined: $STATUS"
+          echo "test_outcome=$STATUS" >> $GITHUB_OUTPUT
+          echo "✅ Test outcome determined: $STATUS"
 
       - name: Generate build summary
         if: always()
@@ -160,3 +164,29 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Add Workflow Summary (Badges)
+        if: always()
+        run: |
+          PAGE_URL=${{ steps.deployment.outputs.page_url }}
+          BASE_URL="${PAGE_URL%/}"
+          TEST_STATUS=${{ needs.build.outputs.test_outcome }}
+
+          if [[ "$TEST_STATUS" == "FAIL" ]]; then
+            STATUS_ICON="❌"
+            STATUS_TEXT="Failed (setup/config error)"
+          elif [[ "$TEST_STATUS" == "UNSTABLE" ]]; then
+            STATUS_ICON="⚠️"
+            STATUS_TEXT="Unstable (some tests failed)"
+          else
+            STATUS_ICON="✅"
+            STATUS_TEXT="All tests passed"
+          fi
+
+          echo "### 🤖 Hyperscale SSD Framework CI/CD" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[![Ubuntu Latest Report](https://img.shields.io/badge/Ubuntu-Latest_Build-blue)](${BASE_URL}/latest/ubuntu-latest/index.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Windows Latest Report](https://img.shields.io/badge/Windows-Latest_Build-blue)](${BASE_URL}/latest/windows-latest/index.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Report History](https://img.shields.io/badge/All-Builds-green)](${BASE_URL}/)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Build #${{ github.run_number }} | Status: $STATUS_ICON $STATUS_TEXT" >> $GITHUB_STEP_SUMMARY
