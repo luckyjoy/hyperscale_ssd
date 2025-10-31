@@ -6,11 +6,12 @@ on:
   pull_request:
     branches: [ main ]
 
+# Updated permissions:
+# 'contents: write' is needed for peaceiris/actions-gh-pages to push to the gh-pages branch.
+# 'actions: read' is for dawidd6/action-download-artifact
 permissions:
   contents: write
-  pages: write
-  id-token: write
-  actions: read # This is the correct permission for dawidd6/action-download-artifact@v6
+  actions: read
 
 env:
   ALLURE_VERSION: 2.29.0
@@ -102,6 +103,10 @@ jobs:
       - name: Get workflow filename
         id: get_workflow_name
         run: echo "WORKFLOW_FILE=$(basename .github/workflows/*.yml)" >> $GITHUB_ENV
+
+      # Add this step to easily get the repo name for the summary
+      - name: Get repository name
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
 
       # Fix: Use previous working download artifact method
       - name: Download previous Allure history artifact
@@ -260,15 +265,28 @@ jobs:
           </script>
           <hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$INDEX_FILE"
 
-      - name: Upload Pages Artifact
-        uses: actions/upload-pages-artifact@v3
+      # --- REMOVED STEP ---
+      # - name: Upload Pages Artifact
+      #   uses: actions/upload-pages-artifact@v3
+      #   with:
+      #     path: ${{ env.SITE_DIR }}
+
+      # --- NEW STEP ---
+      # Deploys the content of 'site' directory to the 'gh-pages' branch
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: ${{ env.SITE_DIR }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ${{ env.SITE_DIR }}
+          publish_branch: gh-pages
+          force_orphan: true # Creates a clean branch history each time
 
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      # --- REMOVED STEP ---
+      # - name: Deploy to GitHub Pages
+      #   id: deployment
+      #   uses: actions/deploy-pages@v4
 
+      # This step is crucial for persisting the history dashboard
       - name: Upload Allure History Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -276,10 +294,11 @@ jobs:
           path: ${{ env.SITE_DIR }}
           retention-days: 7
 
+      # --- UPDATED STEP ---
+      # Builds the gh-pages URL manually
       - name: Add Workflow Summary (Badges)
         run: |
-          PAGE_URL=${{ steps.deployment.outputs.page_url }}
-          BASE_URL="${PAGE_URL%/}"
+          BASE_URL="https://${{ github.repository_owner }}.github.io/${{ env.REPO_NAME }}"
           TEST_STATUS=${{ needs.test.outputs.test_outcome }}
 
           if [[ "$TEST_STATUS" == "FAIL" ]]; then

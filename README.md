@@ -1,5 +1,5 @@
 ````markdown
-# SSD Hyperscale Simulation Test Framework
+# 🚀 SSD Hyperscale Simulation Test Framework
 
 **Author:** Bang Thien Nguyen | [ontario1998@gmail.com](mailto:ontario1998@gmail.com)
 
