@@ -35,7 +35,7 @@ jobs:
         run: |
           set -e
           python -m pip install --upgrade pip
-          pip install behave allure-behave jq
+          pip install behave allure-behave behave-html-pretty jq
 
       - name: Run Behave tests
         id: behave
@@ -49,7 +49,6 @@ jobs:
           tail -n 20 behave_output.txt | grep -E "scenarios.*(passed|failed|error|skipped)" | tee stats_line.txt || true
           echo "Detected stats line:" && cat stats_line.txt || true
 
-          # Determine status
           if grep -q "error" behave_output.txt; then
             STATUS="FAIL"
           elif grep -q "scenarios failed" behave_output.txt; then
@@ -70,26 +69,48 @@ jobs:
           BUILD_NUMBER="${{ github.run_number }}"
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           REPORT_URL="builds/${{ matrix.os }}/build_${BUILD_NUMBER}/index.html"
+          CATEGORY="Functional"
+          EXECUTOR="GitHub Actions"
+          ENVIRONMENT="${{ matrix.os }}"
+          PY_VERSION=$(python -V | awk '{print $2}')
 
           PASSED=$(grep -oE '[0-9]+ scenarios passed' behave_output.txt | awk '{print $1}' || echo 0)
           FAILED=$(grep -oE '[0-9]+ scenarios failed' behave_output.txt | awk '{print $1}' || echo 0)
           ERRORED=$(grep -oE '[0-9]+ scenarios error' behave_output.txt | awk '{print $1}' || echo 0)
           SKIPPED=$(grep -oE '[0-9]+ scenarios skipped' behave_output.txt | awk '{print $1}' || echo 0)
 
-          echo "{
-            \"build\": ${BUILD_NUMBER},
-            \"os\": \"${{ matrix.os }}\",
-            \"timestamp\": \"${TIMESTAMP}\",
-            \"passed\": ${PASSED},
-            \"failed\": ${FAILED},
-            \"errored\": ${ERRORED},
-            \"skipped\": ${SKIPPED},
-            \"status\": \"${STATUS}\",
-            \"report_url\": \"${REPORT_URL}\",
-            \"commit\": \"${GITHUB_SHA}\"
-          }" > "history/summary.json"
+          jq -n --arg build "$BUILD_NUMBER" \
+                --arg os "${{ matrix.os }}" \
+                --arg timestamp "$TIMESTAMP" \
+                --arg category "$CATEGORY" \
+                --arg executor "$EXECUTOR" \
+                --arg env "$ENVIRONMENT" \
+                --arg pyver "$PY_VERSION" \
+                --arg report "$REPORT_URL" \
+                --arg commit "$GITHUB_SHA" \
+                --arg status "$STATUS" \
+                --argjson passed "$PASSED" \
+                --argjson failed "$FAILED" \
+                --argjson errored "$ERRORED" \
+                --argjson skipped "$SKIPPED" \
+                '[{
+                  build: ($build | tonumber),
+                  os: $os,
+                  timestamp: $timestamp,
+                  category: $category,
+                  executor: $executor,
+                  environment: $env,
+                  python: $pyver,
+                  passed: $passed,
+                  failed: $failed,
+                  errored: $errored,
+                  skipped: $skipped,
+                  status: $status,
+                  report_url: $report,
+                  commit: $commit
+                }]' > history/summary.json
 
-          echo "✅ Created summary.json:"
+          echo "✅ Created structured history/summary.json:"
           cat history/summary.json
 
       - name: Upload artifacts
@@ -116,7 +137,7 @@ jobs:
       - name: Prepare site directory
         run: mkdir -p site builds
 
-      - name: Merge build summaries
+      - name: Merge summaries
         shell: bash
         run: |
           echo "Merging summaries..."
@@ -129,24 +150,27 @@ jobs:
             echo "[]" > site/history_old.json
           fi
 
-          jq -s 'add' site/history_old.json $summaries > site/history.json
-          echo "✅ Merged site/history.json:"
+          jq -s 'add | sort_by(.build) | unique_by(.build,.os)' site/history_old.json $summaries > site/history.json
+
+          echo "✅ Final merged history.json:"
           cat site/history.json
 
       - name: Build dashboard
         shell: bash
         run: |
           mkdir -p site
-          echo '<!DOCTYPE html>' > site/index.html
-          echo '<html lang="en"><head><meta charset="UTF-8">' >> site/index.html
-          echo '<title>🏗️ Build History Dashboard</title>' >> site/index.html
-          echo '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>' >> site/index.html
-          echo '<style>body{font-family:Arial,sans-serif;background:#0f1117;color:#ddd;padding:20px;}h1{color:#00e676;}table{width:100%;border-collapse:collapse;margin-top:20px;}th,td{padding:10px;text-align:left;border-bottom:1px solid #333;}a{color:#66ccff;text-decoration:none;}a:hover{text-decoration:underline;}canvas{margin-top:40px;background:#1a1d24;border-radius:8px;padding:10px;}</style></head>' >> site/index.html
-          echo '<body><h1>🚀 Build History Dashboard</h1><p>Track all CI runs with Pass / Unstable / Fail status.</p>' >> site/index.html
-          echo '<table id="buildTable"><thead><tr><th>Build</th><th>OS</th><th>Timestamp</th><th>Passed</th><th>Failed</th><th>Errored</th><th>Skipped</th><th>Status</th><th>Commit</th><th>Report</th></tr></thead><tbody></tbody></table><canvas id="trendChart" height="120"></canvas>' >> site/index.html
-          echo '<script>fetch("history.json").then(r=>r.json()).then(d=>{const b=document.querySelector("#buildTable tbody");const l=[],p=[],f=[],e=[];d.sort((a,b)=>a.build-b.build).forEach(x=>{const color=x.status==="PASS"?"#00e676":x.status==="UNSTABLE"?"#ffca28":"#ff5252";const r=document.createElement("tr");r.innerHTML=`<td>${x.build}</td><td>${x.os}</td><td>${new Date(x.timestamp).toLocaleString()}</td><td style=color:#00e676>${x.passed}</td><td style=color:#ff5252>${x.failed}</td><td style=color:#ff7043>${x.errored}</td><td>${x.skipped}</td><td style=color:${color}>${x.status}</td><td><code>${x.commit.substring(0,7)}</code></td><td><a href=${x.report_url} target=_blank>View</a></td>`;b.appendChild(r);l.push('Build '+x.build+' ('+x.os+')');p.push(x.passed);f.push(x.failed);e.push(x.errored)});new Chart(document.getElementById('trendChart'),{type:'line',data:{labels:l,datasets:[{label:'Passed',data:p,borderColor:'#00e676',fill:false},{label:'Failed',data:f,borderColor:'#ff5252',fill:false},{label:'Errored',data:e,borderColor:'#ff7043',fill:false}]},options:{scales:{y:{beginAtZero:true,ticks:{color:'#aaa'}},x:{ticks:{color:'#aaa'}}},plugins:{legend:{labels:{color:'#fff'}}}}})}).catch(e=>console.error(e));</script>' >> site/index.html
-          echo '</body></html>' >> site/index.html
-          echo "✅ Dashboard HTML generated successfully."
+          {
+            echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
+            echo '<title>🏗️ Build History Dashboard</title>'
+            echo '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>'
+            echo '<style>body{font-family:Arial,sans-serif;background:#0f1117;color:#ddd;padding:20px;}h1{color:#00e676;}table{width:100%;border-collapse:collapse;margin-top:20px;}th,td{padding:10px;text-align:left;border-bottom:1px solid #333;}a{color:#66ccff;text-decoration:none;}a:hover{text-decoration:underline;}canvas{margin-top:40px;background:#1a1d24;border-radius:8px;padding:10px;}</style></head>'
+            echo '<body><h1>🚀 Build History Dashboard</h1><p>Track all CI runs by Category, OS, and Status.</p>'
+            echo '<table id="buildTable"><thead><tr><th>Build</th><th>OS</th><th>Category</th><th>Executor</th><th>Environment</th><th>Python</th><th>Passed</th><th>Failed</th><th>Errored</th><th>Skipped</th><th>Status</th><th>Timestamp</th><th>Report</th></tr></thead><tbody></tbody></table><canvas id="trendChart" height="120"></canvas>'
+            echo '<script>fetch("history.json").then(r=>r.json()).then(d=>{const b=document.querySelector("#buildTable tbody");const l=[],p=[],f=[],e=[];d.sort((a,b)=>a.build-b.build).forEach(x=>{const color=x.status==="PASS"?"#00e676":x.status==="UNSTABLE"?"#ffca28":"#ff5252";const r=document.createElement("tr");r.innerHTML=`<td>${x.build}</td><td>${x.os}</td><td>${x.category}</td><td>${x.executor}</td><td>${x.environment}</td><td>${x.python}</td><td style=color:#00e676>${x.passed}</td><td style=color:#ff5252>${x.failed}</td><td style=color:#ff7043>${x.errored}</td><td>${x.skipped}</td><td style=color:${color}>${x.status}</td><td>${new Date(x.timestamp).toLocaleString()}</td><td><a href=${x.report_url} target=_blank>View</a></td>`;b.appendChild(r);l.push('Build '+x.build+' ('+x.os+')');p.push(x.passed);f.push(x.failed);e.push(x.errored)});new Chart(document.getElementById('trendChart'),{type:'line',data:{labels:l,datasets:[{label:'Passed',data:p,borderColor:'#00e676',fill:false},{label:'Failed',data:f,borderColor:'#ff5252',fill:false},{label:'Errored',data:e,borderColor:'#ff7043',fill:false}]},options:{scales:{y:{beginAtZero:true,ticks:{color:'#aaa'}},x:{ticks:{color:'#aaa'}}},plugins:{legend:{labels:{color:'#fff'}}}}})}).catch(e=>console.error(e));</script>'
+            echo '</body></html>'
+          } > site/index.html
+
+          echo "✅ Dashboard generated with categories, environment, and executors."
 
       - name: Upload dashboard artifact
         uses: actions/upload-pages-artifact@v3
