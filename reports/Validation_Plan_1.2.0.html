@@ -1,0 +1,1388 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Robotics BDD Simulation Framework Validation Plan</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Inter', sans-serif; }
+  .resizable-container { display: flex; height: 100vh; }
+  #toc-panel { min-width: 250px; max-width: 50%; }
+  #resize-bar { width: 8px; cursor: ew-resize; background-color: #e2e8f0; transition: background-color 0.2s ease; }
+  #resize-bar:hover { background-color: #cbd5e1; }
+  #content-panel { flex-grow: 1; overflow-y: auto; }
+  /* Rotate the chevron icon only when the details element is open */
+  details > summary .chevron { transform: rotate(0deg); }
+  details[open] > summary .chevron { transform: rotate(90deg); }
+</style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+<div class="resizable-container">
+  <div id="toc-panel" class="flex-shrink-0 bg-white shadow-xl p-6 overflow-y-auto">
+    <h2 class="text-2xl font-bold mb-4 text-gray-900">📑 Table of Contents</h2>
+    <nav>
+      <ul class="space-y-1 text-sm font-medium">
+        <li><a href="#product-summary" class="block p-2 rounded hover:bg-gray-200">Product Summary</a></li>
+        <li><a href="#validation-summary" class="block p-2 rounded hover:bg-gray-200">Validation Summary</a></li>
+        <li><a href="#test-purposes" class="block p-2 rounded hover:bg-gray-200">Test Purposes</a></li>
+        <li><a href="#framework-capabilities" class="block p-2 rounded hover:bg-gray-200">Framework Capabilities</a></li>
+        <li><a href="#platform-support" class="block p-2 rounded hover:bg-gray-200">Platform Support</a></li>
+        <li><a href="#key-features" class="block p-2 rounded hover:bg-gray-200">Key Features</a></li>
+        <li><a href="#challenges" class="block p-2 rounded hover:bg-gray-200">Challenges</a></li>
+        <li><a href="#limitations" class="block p-2 rounded hover:bg-gray-200">Limitations</a></li>
+        <li><a href="#schedule-and-roles" class="block p-2 rounded hover:bg-gray-200">Schedule & Roles</a></li>
+        <li><a href="#automated-features" class="block p-2 rounded hover:bg-gray-200">Automated Features</a></li>
+        <li><a href="#manual-features" class="block p-2 rounded hover:bg-gray-200">Manual Features</a></li>
+        <li><a href="#traceability-matrix" class="block p-2 rounded hover:bg-gray-200">Traceability Matrix</a></li>
+        <li><a href="#revisions" class="block p-2 rounded hover:bg-gray-200">Revision History</a></li>
+      </ul>
+    </nav>
+  </div>
+
+  <div id="resize-bar"></div>
+
+  <div id="content-panel" class="flex-1 p-8 overflow-y-auto">
+    <header class="bg-white rounded-xl shadow-lg p-6 mb-8">
+      <h1 class="text-4xl font-extrabold text-gray-900 mb-2">Robotics BDD Simulation Framework Validation Plan</h1>
+      <p class="text-gray-500 text-sm mb-4">Auto Generated on 2025-11-01 11:37:38</p> <div class="text-gray-600 text-lg">
+        <span class="font-semibold">Version: 1.2.0</span>
+        <span class="mx-2 text-gray-400">|</span> 
+        <span class="font-semibold">Revised Date: 2025-09-30</span>
+      </div>
+    </header>
+
+    <section id="product-summary" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+      <h2 class="text-2xl font-semibold text-gray-900 mb-4">Product Summary</h2>
+      <ul class="list-disc list-inside text-gray-600 space-y-1">
+        <li><strong>Product Name:</strong> Robotics BDD Simulation Framework</li>
+        <li><strong>Product Model:</strong> BDD-Sim-PyBullet</li>
+        <li><strong>Product Manufacturer:</strong> TBD</li>
+        <li><strong>Target System Component:</strong> Pioneer3DX Mobile Robot (Simulated)</li>
+        <li><strong>Target System Version:</strong> 1.20.34</li>
+        <li><strong>Target Environment:</strong> PyBullet and Gazebo Simulation Environments</li>
+        <li><strong>Test Framework:</strong> Gherkin (Feature files), Pytest (Step definitions), Allure HTML Report</li>
+      </ul>
+    </section>
+
+    <section id="validation-summary" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+      <h2 class="text-2xl font-semibold text-gray-900 mb-4">Validation Summary</h2>
+      <p class="text-gray-600"><strong>Objective:</strong> To rigorously validate the BDD simulation framework's adherence to specified robot behaviors (Navigation, Safety, Sensing, Locomotion) within physics-based environments.</p>
+      
+      <div class="grid md:grid-cols-2 gap-6 mt-6 pt-4 border-t border-gray-200">
+        <div>
+          <h3 class="text-xl font-semibold text-green-700 mb-3">In Scope</h3>
+          <ul class="list-disc list-inside space-y-2">
+            <li class="text-green-700">Navigation: Movement in 3D, diagonal, zigzag, and circular paths.</li><li class="text-green-700">Pick_and_Place: Object manipulation and blocked gripper scenarios.</li><li class="text-green-700">Safety: Boundary constraints and single/multi-obstacle avoidance.</li><li class="text-green-700">Sensing: Kalman filter convergence and object detection accuracy.</li><li class="text-green-700">Locomotion: Walking and crouching state verification.</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="text-xl font-semibold text-red-700 mb-3">Out of Scope</h3>
+          <ul class="list-disc list-inside space-y-2">
+            <li class="text-red-700">Performance tests (e.g., maximum CPU usage, loop timing) are not included in this scope.</li><li class="text-red-700">Real-world hardware deployment or testing is outside the scope of the simulation framework validation.</li><li class="text-red-700">Advanced AI/ML path planning algorithms beyond basic navigation commands.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="test-purposes" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+      <h2 class="text-2xl font-semibold text-gray-900 mb-4">Test Purposes</h2>
+      <ul class="list-disc list-inside text-gray-600">
+        <li>Ensure simulation physics models (PyBullet) accurately reflect the Pioneer3DX dynamics.</li><li>Verify the correct implementation of the robot's control logic against Gherkin specifications.</li><li>Automate the regression suite for every code commit.</li><li>Provide clear traceability from requirements (requirements.csv) to test results (Allure Report).</li>
+      </ul>
+    </section>
+
+    <section id="framework-capabilities" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+      <h2 class="text-2xl font-semibold text-gray-900 mb-4">Framework Capabilities</h2>
+      <ul class="list-disc list-inside text-gray-600">
+        <li>Python 3.10+ Behave/Pytest-BDD framework execution.</li><li>Dynamic scenario execution using Scenario Outlines and data tables.</li><li>Simulation state management (resetting environment and robot position).</li><li>Real-time position and velocity validation checks.</li>
+      </ul>
+    </section>
+
+    <section id="platform-support" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+      <h2 class="text-2xl font-semibold text-gray-900 mb-4">Platform Support</h2>
+      <div class="grid md:grid-cols-3 gap-6 text-gray-600">
+        <div>
+          <h3 class="font-semibold">Operating Systems</h3>
+          <ul class="list-disc list-inside">
+            <li>Linux (Ubuntu 20.04+ Recommended)</li><li>Windows 10/11</li><li>macOS (Limited Support)</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="font-semibold">Architectures</h3>
+          <ul class="list-disc list-inside">
+            <li>x86-64 (Intel and AMD)</li><li>ARM64 (Simulation Host/Deployment Target)</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="font-semibold">Virtualization / Containerization</h3>
+          <ul class="list-disc list-inside">
+            <li>Docker Containers (Recommended for consistency)</li><li>QEMU/KVM Virtual Machines</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="key-features" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+      <h2 class="text-2xl font-semibold text-gray-900 mb-4">Key Features</h2>
+      <ul class="list-disc list-inside text-gray-600">
+        <li>BDD-driven, human-readable acceptance criteria for robot behaviors.</li><li>Real-time state and physics validation checks within the simulation.</li><li>High-fidelity positional and sensor data testing.</li><li>Support for multiple simulation engines (PyBullet/Gazebo).</li><li>Automated regression reporting via Allure Test Report.</li>
+      </ul>
+    </section>
+
+    <section id="challenges" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+      <h2 class="text-2xl font-semibold text-gray-900 mb-4">Challenges</h2>
+      <ul class="list-disc list-inside text-gray-600">
+        <li>Ensuring simulation physics models (PyBullet) accurately reflect the Pioneer3DX dynamics.</li><li>Maintaining stable and consistent behavior across different simulation engine versions (PyBullet vs. Gazebo).</li><li>Handling race conditions during real-time state validation checks.</li><li>Integrating the framework seamlessly into CI/CD pipelines.</li>
+      </ul>
+    </section>
+
+    <section id="limitations" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+      <h2 class="text-2xl font-semibold text-gray-900 mb-4">Limitations</h2>
+      <ul class="list-disc list-inside text-gray-600">
+        <li>Manual tests are required for subjective evaluation (e.g., visual smoothness, physics realism).</li><li>Performance tests (e.g., maximum CPU usage, loop timing) are not currently included in the BDD scope.</li><li>Requires a running PyBullet or Gazebo instance for execution.</li>
+      </ul>
+    </section>
+
+    <section id="schedule-and-roles" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+      <h2 class="text-2xl font-semibold text-gray-900 mb-4">Schedule & Roles</h2>
+      <p class="text-gray-600"><strong>Estimated Duration:</strong> 1 days</p>
+      <div class="mt-4 grid md:grid-cols-2 gap-4 text-gray-600">
+        <div><strong>QA Manager:</strong> TBD</div>
+        <div><strong>Validation Engineer:</strong> TBD</div>
+      </div>
+    </section>
+
+    <section id="automated-features" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+      <details>
+        <summary class="flex items-center justify-between cursor-pointer text-2xl font-semibold text-gray-900 hover:text-blue-700">
+          Automated Features
+          <span class="chevron transition-transform duration-300">▶</span>
+        </summary>
+        <div class="mt-4">
+          <details id="advance-hyperscale-feature" class="mb-8 bg-white rounded-xl shadow-md">
+  <summary class="flex items-center justify-between cursor-pointer px-6 py-4 text-2xl font-semibold text-gray-900 hover:text-blue-700 transition-colors duration-150">
+    advance_hyperscale.feature
+    <span class="chevron transition-transform duration-300">▶</span>
+  </summary>
+  <div class="p-6 border-t border-gray-200">
+    <p class="text-gray-600 mb-6"><strong>Feature:</strong> Advanced SSD Hyperscale Simulation</p>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_10&gt; &lt;REQ_SSD_11&gt; Sustained high-write endurance</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a VM is launched with a dedicated NVMe SSD</li>
+          <li>When I run a sustained <span class="text-blue-600 font-bold">percent</span>% write FIO workload for <span class="text-blue-600 font-bold">duration</span> hour</li>
+          <li>Then the SSD write throughput should remain within 90% of baseline</li>
+          <li>And no critical errors should occur</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">percent</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">duration</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">90</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">1</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">95</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">4</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">55</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">5</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">#</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">100</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">8</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_12&gt; &lt;REQ_SSD_05&gt; Randomized multi-tenant IO stress</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given <span class="text-blue-600 font-bold">num_vms</span> VMs are launched sharing the same NVMe SSD</li>
+          <li>When each VM runs random <span class="text-blue-600 font-bold">io_mix</span> read/write workloads</li>
+          <li>Then latency for all VMs should remain below <span class="text-blue-600 font-bold">latency_ms</span>ms average</li>
+          <li>And no VM should starve IO</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">num_vms</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">io_mix</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">latency_ms</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">3</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">50/50</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">2</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">5</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">70/30</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">3</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">10</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">90/10</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">5</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_13&gt; &lt;REQ_SSD_14&gt; NVMe queue depth saturation</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a VM is launched with NVMe SSD</li>
+          <li>When I run FIO with queue depth <span class="text-blue-600 font-bold">qd</span></li>
+          <li>Then IOPS should scale linearly with queue depth up to hardware limit</li>
+          <li>And latency should remain within hardware spec</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">qd</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">16</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">32</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">64</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">128</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">#</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">256</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_15&gt; &lt;REQ_SSD_16&gt; SMART monitoring and SMART polling</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a VM is launched with NVMe SSD</li>
+          <li>When I poll SMART attributes every <span class="text-blue-600 font-bold">interval_minutes</span> minutes under a <span class="text-blue-600 font-bold">workload_type</span> workload</li>
+          <li>Then temperature should remain below <span class="text-blue-600 font-bold">temp_c</span>C</li>
+          <li>And reallocated sector count should remain zero</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">interval_minutes</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">workload_type</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">temp_c</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">5</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">mixed</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">70</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">10</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">sequential</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">65</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_25&gt; &lt;REQ_SSD_26&gt; End-to-end data integrity</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a VM is running FIO checksum workload</li>
+          <li>When a <span class="text-blue-600 font-bold">fault_type</span> event occurs</li>
+          <li>Then no data corruption should be detected</li>
+          <li>And all data blocks should be reported correctly</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">fault_type</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">random power loss</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">hot unplug</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">controller reset</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_17&gt; &lt;REQ_SSD_18&gt; Firmware update resilience</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a VM is launched with NVMe SSD</li>
+          <li>When I trigger a firmware update while SSD is under <span class="text-blue-600 font-bold">load_level</span> load</li>
+          <li>Then update should complete successfully</li>
+          <li>And SSD should remain accessible post-update</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">load_level</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">idle</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">light</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">heavy</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_19&gt; &lt;REQ_SSD_20&gt; &lt;REQ_SSD_21&gt; Multi-tenant QoS enforcement</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given two VMs are launched sharing a single NVMe SSD</li>
+          <li>When I throttle one VM to 50% max IOPS</li>
+          <li>Then the other VM should achieve full IOPS</li>
+          <li>And throttled VM should not exceed assigned IOPS</li>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_08&gt; Latency spike under heavy queue depth</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a VM is running mixed 70/30 read/write workload</li>
+          <li>When I inject 5 random latency spikes between 50-200ms</li>
+          <li>Then SSD latency spikes should not exceed <span class="text-blue-600 font-bold">latency_ms</span>ms above baseline</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">latency_ms</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">20</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">30</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+  </div>
+</details>
+
+<details id="ssd-comparision-feature" class="mb-8 bg-white rounded-xl shadow-md">
+  <summary class="flex items-center justify-between cursor-pointer px-6 py-4 text-2xl font-semibold text-gray-900 hover:text-blue-700 transition-colors duration-150">
+    ssd_comparision.feature
+    <span class="chevron transition-transform duration-300">▶</span>
+  </summary>
+  <div class="p-6 border-t border-gray-200">
+    <p class="text-gray-600 mb-6"><strong>Feature:</strong> SSD Vendor Performance Comparison</p>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_COM_01&gt; Compare sequential read/write speeds</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given the <span class="text-blue-600 font-bold">vendor</span> SSD is connected</li>
+          <li>When I run a sequential speed test for <span class="text-blue-600 font-bold">time</span> seconds</li>
+          <li>Then the reported sequential read speed should be at least <span class="text-blue-600 font-bold">min_read_speed</span> MB/s</li>
+          <li>And the reported sequential write speed should be at least <span class="text-blue-600 font-bold">min_write_speed</span> MB/s</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">vendor</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">min_read_speed</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">min_write_speed</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">time</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">"Samsung 990"</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">6000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">5000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">120</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">"SanDisk Pro"</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">500</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">450</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">120</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">"Pure Storage"</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">3000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">2500</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">120</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_COM_02&gt; Compare random 4K I/O performance</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given the <span class="text-blue-600 font-bold">vendor</span> SSD is connected</li>
+          <li>When I run a random 4K I/O test for <span class="text-blue-600 font-bold">time</span> seconds</li>
+          <li>Then the reported random read IOPS should be at least <span class="text-blue-600 font-bold">min_read_iops</span></li>
+          <li>And the reported random write IOPS should be at least <span class="text-blue-600 font-bold">min_write_iops</span></li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">vendor</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">min_read_iops</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">min_write_iops</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">time</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">"Samsung 990"</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">800000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">700000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">120</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">"SanDisk Pro"</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">100000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">90000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">120</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">"Pure Storage"</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">500000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">450000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">120</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+  </div>
+</details>
+
+<details id="ssd-fault-injection-feature" class="mb-8 bg-white rounded-xl shadow-md">
+  <summary class="flex items-center justify-between cursor-pointer px-6 py-4 text-2xl font-semibold text-gray-900 hover:text-blue-700 transition-colors duration-150">
+    ssd_fault_injection.feature
+    <span class="chevron transition-transform duration-300">▶</span>
+  </summary>
+  <div class="p-6 border-t border-gray-200">
+    <p class="text-gray-600 mb-6"><strong>Feature:</strong> SSD Fault Injection and Recovery Validation</p>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_25&gt; Random power loss should not cause corruption</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a VM is launched with a dedicated NVMe SSD</li>
+          <li>When a random power loss event occurs</li>
+          <li>Then no data corruption should be detected</li>
+          <li>And all data blocks should be reported correctly</li>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_06&gt; &lt;REQ_SSD_26&gt; Hot unplug should recover without errors</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a VM is launched with NVMe SSD</li>
+          <li>When a hot unplug event occurs</li>
+          <li>Then no data corruption should be detected</li>
+          <li>And all data blocks should be reported correctly</li>
+          <li>And devices should recover and IO metrics should remain acceptable</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">vm_setup</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">single VM</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">multi-VM (2 VMs)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_26&gt; Controller reset should recover without data corruption</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a VM is launched with a dedicated NVMe SSD</li>
+          <li>When a controller reset event occurs</li>
+          <li>Then no data corruption should be detected</li>
+          <li>And all data blocks should be reported correctly</li>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_17&gt; &lt;REQ_SSD_18&gt; SSD firmware update under load should succeed</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a mounted SSD volume</li>
+          <li>When I trigger a firmware update while SSD is under <span class="text-blue-600 font-bold">load_level</span> load</li>
+          <li>Then update should complete successfully</li>
+          <li>And SSD should remain accessible post-update</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">load_level</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">idle</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">light</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">heavy</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_19&gt; &lt;REQ_SSD_20&gt; &lt;REQ_SSD_21&gt; Multi-tenant QoS enforcement</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given two VMs are launched sharing a single NVMe SSD</li>
+          <li>When I throttle one VM to 50% max IOPS</li>
+          <li>Then the other VM should achieve full IOPS</li>
+          <li>And throttled VM should not exceed assigned IOPS</li>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_08&gt; Latency spikes should remain within acceptable limits</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a VM is running steady workload</li>
+          <li>When I inject <span class="text-blue-600 font-bold">spike_count</span> random latency spikes between 50-200ms</li>
+          <li>Then SSD latency spikes should not exceed <span class="text-blue-600 font-bold">latency_ms</span>ms above baseline</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">spike_count</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">latency_ms</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">5</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">20</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">10</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">30</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_23&gt; &lt;REQ_SSD_24&gt; Sustained endurance test should remain stable</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a mounted SSD volume</li>
+          <li>When I perform a <span class="text-blue-600 font-bold">runtime</span> hour sustained sequential write of <span class="text-blue-600 font-bold">size_gb</span> GB with a block size of <span class="text-blue-600 font-bold">bs_kb</span> KB</li>
+          <li>Then the average write throughput should be at least "0.90" GB/s</li>
+          <li>And the average write latency should be less than "100" microseconds</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">runtime</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">size_gb</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">bs_kb</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">1</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">500</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">128</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">2</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">1000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">256</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">4</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">2000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">512</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_15&gt; &lt;REQ_SSD_16&gt; SMART monitoring should remain within safe thresholds</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a VM is launched with NVMe attached</li>
+          <li>When I poll SMART attributes every <span class="text-blue-600 font-bold">interval</span> minutes under a <span class="text-blue-600 font-bold">workload</span> workload</li>
+          <li>Then temperature should remain below 70C</li>
+          <li>And reallocated sector count should remain zero</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">interval</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">workload</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">5</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">mixed</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">10</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">sequential</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+  </div>
+</details>
+
+<details id="ssd-mixed-io-feature" class="mb-8 bg-white rounded-xl shadow-md">
+  <summary class="flex items-center justify-between cursor-pointer px-6 py-4 text-2xl font-semibold text-gray-900 hover:text-blue-700 transition-colors duration-150">
+    ssd_mixed_io.feature
+    <span class="chevron transition-transform duration-300">▶</span>
+  </summary>
+  <div class="p-6 border-t border-gray-200">
+    <p class="text-gray-600 mb-6"><strong>Feature:</strong> SSD Hyperscale Reliability and Longevity</p>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_22&gt; Mixed Random Read/Write Workload</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a mounted SSD volume</li>
+          <li>And the volume is pre-filled with data</li>
+          <li>When I perform a sustained mixed random workload with a read/write mix of "<span class="text-blue-600 font-bold">rwmix</span>"</li>
+          <li>Then the average read IOPS should be at least "<span class="text-blue-600 font-bold">read_iops</span>"</li>
+          <li>And the average write IOPS should be at least "<span class="text-blue-600 font-bold">write_iops</span>"</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">rwmix</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">read_iops</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">write_iops</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">70/30</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">150000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">50000</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">50/50</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">120000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">120000</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">30/70</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">50000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">150000</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_23&gt; &lt;REQ_SSD_24&gt; Prolonged Endurance Test</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a mounted SSD volume</li>
+          <li>And the volume is pre-filled with data</li>
+          <li>When I perform a "<span class="text-blue-600 font-bold">runtime</span>" hour sustained sequential write of "<span class="text-blue-600 font-bold">size_gb</span>" GB with a block size of "<span class="text-blue-600 font-bold">bs_kb</span>" KB</li>
+          <li>Then the average write throughput should be at least "<span class="text-blue-600 font-bold">throughput</span>" GB/s</li>
+          <li>And the average write latency should be less than "<span class="text-blue-600 font-bold">latency</span>" microseconds</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">runtime</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">size_gb</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">bs_kb</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">throughput</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">latency</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">1</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">500</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">128</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">0.90</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">100</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">2</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">1000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">256</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">0.90</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">100</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">4</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">2000</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">512</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">0.90</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">100</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+  </div>
+</details>
+
+<details id="ssd-performance-feature" class="mb-8 bg-white rounded-xl shadow-md">
+  <summary class="flex items-center justify-between cursor-pointer px-6 py-4 text-2xl font-semibold text-gray-900 hover:text-blue-700 transition-colors duration-150">
+    ssd_performance.feature
+    <span class="chevron transition-transform duration-300">▶</span>
+  </summary>
+  <div class="p-6 border-t border-gray-200">
+    <p class="text-gray-600 mb-6"><strong>Feature:</strong> SSD Performance Validation</p>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_13&gt; &lt;REQ_SSD_14&gt; Queue depth scaling validation</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a VM is launched with NVMe SSD</li>
+          <li>When I run FIO with queue depth <span class="text-blue-600 font-bold">qd</span></li>
+          <li>Then IOPS should scale linearly with queue depth up to hardware limit</li>
+          <li>And latency should remain within hardware spec</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">qd</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">32</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">64</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">128</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">256</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">512</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_05&gt; Read/write workload mixes</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a VM is launched with a dedicated NVMe SSD</li>
+          <li>When I run a <span class="text-blue-600 font-bold">read_pct</span>/<span class="text-blue-600 font-bold">write_pct</span> read/write workload for <span class="text-blue-600 font-bold">duration</span> minutes</li>
+          <li>Then SSD throughput should remain stable</li>
+          <li>And latency should remain below <span class="text-blue-600 font-bold">latency</span> ms</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">read_pct</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">write_pct</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">duration</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">latency</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">50</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">50</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">30</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">2</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">70</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">30</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">60</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">3</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">90</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">10</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">120</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">5</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_10&gt; &lt;REQ_SSD_11&gt; Sustained high-write endurance</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a VM is launched with a dedicated NVMe SSD</li>
+          <li>When I run a sustained <span class="text-blue-600 font-bold">percent</span>% write FIO workload for <span class="text-blue-600 font-bold">hours</span> hour</li>
+          <li>Then the SSD write throughput should remain within 90% of baseline</li>
+          <li>And no critical errors should occur</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">percent</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">hours</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">90</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">1</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">95</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">4</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">100</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">8</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_12&gt; &lt;REQ_SSD_05&gt; Latency validation under VM scaling</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given <span class="text-blue-600 font-bold">vm_count</span> VMs are launched sharing the same NVMe SSD</li>
+          <li>When each VM runs random <span class="text-blue-600 font-bold">read_pct</span>/<span class="text-blue-600 font-bold">write_pct</span> read/write workloads</li>
+          <li>Then latency for all VMs should remain below <span class="text-blue-600 font-bold">latency_ms</span>ms average</li>
+          <li>And no VM should starve IO</li>
+          <div class="mt-4"><strong class="text-sm text-gray-700">Examples:</strong></div>
+          <div class="overflow-x-auto">
+            <table class="w-auto divide-y divide-gray-200 mt-2 rounded-lg overflow-hidden border border-gray-300">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">vm_count</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">read_pct</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">write_pct</th>
+                  <th scope="col" class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">latency_ms</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">3</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">50</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">50</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">2</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">5</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">70</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">30</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">3</td>
+                </tr>
+                <tr>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">10</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">90</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">10</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">5</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ul>
+      </div>
+    </details>
+  </div>
+</details>
+
+
+        </div>
+      </details>
+    </section>
+
+    <section id="manual-features" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+      <details>
+        <summary class="flex items-center justify-between cursor-pointer text-2xl font-semibold text-gray-900 hover:text-blue-700">
+          Manual Features
+          <span class="chevron transition-transform duration-300">▶</span>
+        </summary>
+        <div class="mt-4">
+          <details id="manual-endurance-feature" class="mb-8 bg-white rounded-xl shadow-md">
+  <summary class="flex items-center justify-between cursor-pointer px-6 py-4 text-2xl font-semibold text-gray-900 hover:text-blue-700 transition-colors duration-150">
+    manual_endurance.feature
+    <span class="chevron transition-transform duration-300">▶</span>
+  </summary>
+  <div class="p-6 border-t border-gray-200">
+    <p class="text-gray-600 mb-6"><strong>Feature:</strong> Manual Endurance and Wear-Leveling Check</p>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_520&gt; Validate SSD health after 1 PB written</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given the SSD has sustained a 24/7 sequential write workload for 1 PB</li>
+          <li>When the operator collects SMART health data</li>
+          <li>Then wear-leveling count should decrease within expected tolerance</li>
+          <li>And no uncorrectable errors should be present</li>
+          <li>And remaining life should report above 95%</li>
+        </ul>
+      </div>
+    </details>
+  </div>
+</details>
+
+<details id="manual-power-cycle-feature" class="mb-8 bg-white rounded-xl shadow-md">
+  <summary class="flex items-center justify-between cursor-pointer px-6 py-4 text-2xl font-semibold text-gray-900 hover:text-blue-700 transition-colors duration-150">
+    manual_power_cycle.feature
+    <span class="chevron transition-transform duration-300">▶</span>
+  </summary>
+  <div class="p-6 border-t border-gray-200">
+    <p class="text-gray-600 mb-6"><strong>Feature:</strong> Manual Power Cycling Stress Test</p>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_305&gt; Validate data integrity after 100 power cycles</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given a hyperscale SSD with a loaded dataset of 1 TB</li>
+          <li>When the operator performs 100 power cycles (cold reboots) on the server</li>
+          <li>Then the SSD should always enumerate correctly after each cycle</li>
+          <li>And all pre-loaded data should remain intact with no corruption detected</li>
+          <li>And SMART logs should not show abnormal error counts</li>
+        </ul>
+      </div>
+    </details>
+  </div>
+</details>
+
+<details id="manual-thermal-throttling-feature" class="mb-8 bg-white rounded-xl shadow-md">
+  <summary class="flex items-center justify-between cursor-pointer px-6 py-4 text-2xl font-semibold text-gray-900 hover:text-blue-700 transition-colors duration-150">
+    manual_thermal_throttling.feature
+    <span class="chevron transition-transform duration-300">▶</span>
+  </summary>
+  <div class="p-6 border-t border-gray-200">
+    <p class="text-gray-600 mb-6"><strong>Feature:</strong> Manual Thermal Throttling Validation</p>
+    <details class="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 hover:shadow-md transition-shadow duration-200">
+      <summary class="cursor-pointer font-bold text-blue-800 hover:text-blue-600 transition-colors duration-150">&lt;REQ_SSD_412&gt; Validate throttling behavior at 85°C</summary>
+      <div class="mt-4 pl-4 border-l-2 border-gray-300">
+        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+          <li>Given the SSD is operating inside a thermal chamber at 85°C</li>
+          <li>When the operator monitors SSD performance with fio workload</li>
+          <li>Then throughput should gradually reduce to safe operating limits</li>
+          <li>And no unexpected drive resets should occur</li>
+          <li>And SMART attributes should log thermal throttling events</li>
+        </ul>
+      </div>
+    </details>
+  </div>
+</details>
+
+
+        </div>
+      </details>
+    </section>
+
+    <section id="traceability-matrix" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+      <details>
+        <summary class="flex items-center justify-between cursor-pointer text-2xl font-semibold text-gray-900 hover:text-blue-700">
+          Traceability Matrix
+          <span class="chevron transition-transform duration-300">▶</span>
+        </summary>
+        <div class="mt-4">
+          
+        <p class="text-gray-600 mb-4">This matrix links each product requirement to the Behave scenarios that validate it, ensuring comprehensive test coverage.</p>
+        <div class="overflow-x-auto rounded-lg shadow-sm border border-gray-200">
+            <table class="min-w-full bg-white rounded-lg">
+                <thead class="bg-gray-100">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase">Requirement ID</th>
+                        <th class="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase">Description</th>
+                        <th class="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase">Feature File</th>
+                        <th class="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase">Scenario(s)</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+        <tr>
+<td rowspan="1" class="px-6 py-4 font-medium text-gray-700">REQ_COM_01</td>
+<td rowspan="1" class="px-6 py-4 text-gray-600">Compare sequential read/write speeds between multiple SSDs of different providers</td>
+<td class="px-6 py-4 text-gray-600">ssd_comparision.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_COM_01> Compare sequential read/write speeds</td>
+</tr>
+<tr>
+<td rowspan="1" class="px-6 py-4 font-medium text-gray-700">REQ_COM_02</td>
+<td rowspan="1" class="px-6 py-4 text-gray-600">Compare random 4K I/O performance between multiple SSDs of different providers</td>
+<td class="px-6 py-4 text-gray-600">ssd_comparision.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_COM_02> Compare random 4K I/O performance</td>
+</tr>
+<tr>
+<td rowspan="3" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_05</td>
+<td rowspan="3" class="px-6 py-4 text-gray-600">The system shall ensure IO latency and throughput remain within acceptable thresholds during mixed read/write workloads.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_12> <REQ_SSD_05> Randomized multi-tenant IO stress</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_performance.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_05> Read/write workload mixes</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_performance.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_12> <REQ_SSD_05> Latency validation under VM scaling</td>
+</tr>
+<tr>
+<td rowspan="1" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_06</td>
+<td rowspan="1" class="px-6 py-4 text-gray-600">The system shall recover NVMe devices successfully after random hot-unplug events during heavy IO workload.</td>
+<td class="px-6 py-4 text-gray-600">ssd_fault_injection.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_06> <REQ_SSD_26> Hot unplug should recover without errors</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_08</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The system shall inject up to 5 random latency spikes of 50-200ms without violating IO latency thresholds.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_08> Latency spike under heavy queue depth</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_fault_injection.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_08> Latency spikes should remain within acceptable limits</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_10</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The SSD shall maintain write throughput within 90% of its baseline under sustained high-write workloads.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_10> <REQ_SSD_11> Sustained high-write endurance</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_performance.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_10> <REQ_SSD_11> Sustained high-write endurance</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_11</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The system shall not report any critical errors during sustained high-write endurance tests.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_10> <REQ_SSD_11> Sustained high-write endurance</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_performance.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_10> <REQ_SSD_11> Sustained high-write endurance</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_12</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The system shall be capable of launching multiple VMs that share a single NVMe SSD.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_12> <REQ_SSD_05> Randomized multi-tenant IO stress</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_performance.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_12> <REQ_SSD_05> Latency validation under VM scaling</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_13</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The system shall ensure IOPS scales linearly with queue depth up to the hardware limit.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_13> <REQ_SSD_14> NVMe queue depth saturation</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_performance.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_13> <REQ_SSD_14> Queue depth scaling validation</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_14</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The system shall maintain latency within hardware specifications during queue depth scaling.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_13> <REQ_SSD_14> NVMe queue depth saturation</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_performance.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_13> <REQ_SSD_14> Queue depth scaling validation</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_15</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The system shall ensure SSD temperature remains below a specified threshold (70∘ C) during various workloads.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_15> <REQ_SSD_16> SMART monitoring and SMART polling</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_fault_injection.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_15> <REQ_SSD_16> SMART monitoring should remain within safe thresholds</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_16</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The SSD shall not report any reallocated sectors during SMART attribute polling.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_15> <REQ_SSD_16> SMART monitoring and SMART polling</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_fault_injection.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_15> <REQ_SSD_16> SMART monitoring should remain within safe thresholds</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_17</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The system shall successfully complete a firmware update while the SSD is under different load levels.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_17> <REQ_SSD_18> Firmware update resilience</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_fault_injection.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_17> <REQ_SSD_18> SSD firmware update under load should succeed</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_18</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The SSD shall remain accessible and functional after a firmware update.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_17> <REQ_SSD_18> Firmware update resilience</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_fault_injection.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_17> <REQ_SSD_18> SSD firmware update under load should succeed</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_19</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The system shall be able to throttle IOPS for a specific VM sharing a multi-tenant SSD.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_19> <REQ_SSD_20> <REQ_SSD_21> Multi-tenant QoS enforcement</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_fault_injection.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_19> <REQ_SSD_20> <REQ_SSD_21> Multi-tenant QoS enforcement</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_20</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The system shall ensure an un-throttled VM achieves full IOPS when sharing an SSD with a throttled VM.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_19> <REQ_SSD_20> <REQ_SSD_21> Multi-tenant QoS enforcement</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_fault_injection.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_19> <REQ_SSD_20> <REQ_SSD_21> Multi-tenant QoS enforcement</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_21</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The system shall ensure a throttled VM does not exceed its assigned IOPS.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_19> <REQ_SSD_20> <REQ_SSD_21> Multi-tenant QoS enforcement</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_fault_injection.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_19> <REQ_SSD_20> <REQ_SSD_21> Multi-tenant QoS enforcement</td>
+</tr>
+<tr>
+<td rowspan="1" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_22</td>
+<td rowspan="1" class="px-6 py-4 text-gray-600">The system shall achieve a minimum average read IOPS and write IOPS for different mixed workloads.</td>
+<td class="px-6 py-4 text-gray-600">ssd_mixed_io.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_22> Mixed Random Read/Write Workload</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_23</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The system shall achieve a minimum average write throughput for prolonged endurance tests.</td>
+<td class="px-6 py-4 text-gray-600">ssd_fault_injection.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_23> <REQ_SSD_24> Sustained endurance test should remain stable</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_mixed_io.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_23> <REQ_SSD_24> Prolonged Endurance Test</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_24</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The system shall maintain average write latency below a specified threshold during prolonged endurance tests.</td>
+<td class="px-6 py-4 text-gray-600">ssd_fault_injection.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_23> <REQ_SSD_24> Sustained endurance test should remain stable</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_mixed_io.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_23> <REQ_SSD_24> Prolonged Endurance Test</td>
+</tr>
+<tr>
+<td rowspan="2" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_25</td>
+<td rowspan="2" class="px-6 py-4 text-gray-600">The system shall ensure data integrity and detect no corruption after a random power loss event.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_25> <REQ_SSD_26> End-to-end data integrity</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_fault_injection.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_25> Random power loss should not cause corruption</td>
+</tr>
+<tr>
+<td rowspan="3" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_26</td>
+<td rowspan="3" class="px-6 py-4 text-gray-600">The system shall ensure no data corruption is detected after a hot unplug or controller reset event.</td>
+<td class="px-6 py-4 text-gray-600">advance_hyperscale.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_25> <REQ_SSD_26> End-to-end data integrity</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_fault_injection.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_06> <REQ_SSD_26> Hot unplug should recover without errors</td>
+</tr>
+<tr>
+<td class="px-6 py-4 text-gray-600">ssd_fault_injection.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_26> Controller reset should recover without data corruption</td>
+</tr>
+<tr>
+<td rowspan="1" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_305</td>
+<td rowspan="1" class="px-6 py-4 text-gray-600"></td>
+<td class="px-6 py-4 text-gray-600">manual_power_cycle.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_305> Validate data integrity after 100 power cycles</td>
+</tr>
+<tr>
+<td rowspan="1" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_412</td>
+<td rowspan="1" class="px-6 py-4 text-gray-600"></td>
+<td class="px-6 py-4 text-gray-600">manual_thermal_throttling.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_412> Validate throttling behavior at 85°C</td>
+</tr>
+<tr>
+<td rowspan="1" class="px-6 py-4 font-medium text-gray-700">REQ_SSD_520</td>
+<td rowspan="1" class="px-6 py-4 text-gray-600"></td>
+<td class="px-6 py-4 text-gray-600">manual_endurance.feature</td>
+<td class="px-6 py-4 text-gray-600"><REQ_SSD_520> Validate SSD health after 1 PB written</td>
+</tr>
+</tbody></table></div>
+        </div>
+      </details>
+    </section>
+
+    <section id="revisions" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+      <h2 class="text-2xl font-semibold text-gray-900 mb-4">Revision History</h2>
+      <ul class="list-disc list-inside text-gray-600">
+        <li><strong>1.0.0</strong> - N/A: Initial structure created for the Robotics BDD Simulation Framework Validation Plan.</li><li><strong>1.1.0</strong> - N/A: Updated product-specific fields: TargetRobotModel, FirmwareVersion, and confirmed Architectures for the robotics simulation environment.</li><li><strong>1.2.0</strong> - N/A: Refactored key names (e.g., TargetRobotModel -> TargetSystemComponent, FirmwareVersion -> TargetSystemVersion, Interface -> TestFramework) to align with the generic validation plan template.</li>
+      </ul>
+    </section>
+
+    <footer class="text-center text-sm text-gray-500 py-6">
+      <p><strong>© 2025 Bang Thien Nguyen. All rights reserved.</strong></p>
+    </footer>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const tocPanel = document.getElementById('toc-panel');
+  const resizeBar = document.getElementById('resize-bar');
+  let isResizing = false;
+  resizeBar.addEventListener('mousedown', () => {
+    isResizing = true;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'ew-resize';
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    const newWidth = e.clientX;
+    if (newWidth >= 250 && newWidth <= window.innerWidth * 0.5) {
+      tocPanel.style.width = newWidth + 'px';
+    }
+  });
+  document.addEventListener('mouseup', () => {
+    isResizing = false;
+    document.body.style.userSelect = 'auto';
+    document.body.style.cursor = 'default';
+  });
+});
+</script>
+
+</body>
+</html>

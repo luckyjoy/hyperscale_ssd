@@ -169,7 +169,6 @@ stage('Fault Injection Tests') {
 ./                           # Root directory
 ├─ behave.ini                # Behave runner configuration
 ├─ build.bat                 # Windows build script
-├─ ci.bat                    # Windows CI script wrapper
 ├─ environment.py            # Behave environment setup file
 ├─ Jenkinsfile               # CI/CD pipeline definition
 ├─ README.html
@@ -206,19 +205,20 @@ stage('Fault Injection Tests') {
 ├─ logs/                     # Runtime logs and collected metrics
 │  ├─ execution.log
 │  ├─ scenario.log
-│  └─ *.log                   # Various action and verification logs
+│  └─ *.log                  # Various action and verification logs
 ├─ qemu-faults/              # QEMU/QMP scripts for VM launch and fault injection
 │  ├─ qemu_launch_vm.py
 │  ├─ nbdkit_delay_server.sh
 │  ├─ nbd_delay.py
 │  ├─ qmp_injector.py
 │  └─ fault_runner.sh
-├─ reports/                  # Generated HTML reports
-│  └─ *.html
+├─ allure-report/            # Dynamic history report files
+├─ allure-results/           # Behave-Allure raw results directory
 ├─ spdk/                     # SPDK fio jobfiles (legacy/core)
 │  ├─ fio_mixed_rw.job
 │  ├─ fio_multi_device.job
 │  └─ fio_multi_queue.job
+├─ .github/                  # GitHub Actions CI/CD workflows
 └─ supports/                 # Utility scripts for reporting, telemetry, and CI/CD integration
    ├─ product.json
    ├─ ssd_requirements.csv
