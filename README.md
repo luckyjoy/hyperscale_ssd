@@ -1,5 +1,3 @@
-
-````markdown
 # 🚀 SSD Hyperscale Simulation Test Framework
 
 **A Universal Chaos & Performance Framework for NVMe SSDs.**
@@ -259,5 +257,4 @@ Released under the **MIT License** — free to use, modify, and distribute.
 
 > *“Performance is a feature, and reliability is its foundation.”*
 
-```
 
