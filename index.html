@@ -1,0 +1,44 @@
+<html><head><title>Allure Report History</title>
+<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+<style>
+body{font-family:sans-serif;margin:20px;}
+ul{list-style:none;padding:0;}
+li{margin:6px 0;}
+a{text-decoration:none;color:#0366d6;}
+a:hover{text-decoration:underline;}
+#chart-container{max-width:600px;max-height:300px;margin:0;}
+</style></head><body>
+<h1>🤖 Hyperscale SSD Simulation CI/CD Build History</h1>
+<h2>🧩 Latest Allure Reports</h2><ul>
+<li><strong><a href='latest/ubuntu-latest/'>Latest Report (ubuntu-latest)</a></strong> - Last run: Sat Nov 01 13:02:18 PDT 2025</li>
+<li><strong><a href='latest/windows-latest/'>Latest Report (windows-latest)</a></strong> - Last run: Sat Nov 01 13:02:20 PDT 2025</li>
+</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2>
+<ul>
+<li><strong>Build #17</strong> (Run: Sat Nov 01 13:02:18 PDT 2025) - <a href='17/ubuntu-latest/'>Ubuntu</a> / <a href='17/windows-latest/'>Windows</a></li>
+<li><strong>Build #16</strong> (Run: Sat Nov 01 11:51:11 PDT 2025) - <a href='16/ubuntu-latest/'>Ubuntu</a> / <a href='16/windows-latest/'>Windows</a></li>
+<li><strong>Build #15</strong> (Run: Sat Nov 01 11:40:54 PDT 2025) - <a href='15/ubuntu-latest/'>Ubuntu</a> / <a href='15/windows-latest/'>Windows</a></li>
+<li><strong>Build #14</strong> (Run: Sat Nov 01 09:55:03 PDT 2025) - <a href='14/ubuntu-latest/'>Ubuntu</a> / <a href='14/windows-latest/'>Windows</a></li>
+<li><strong>Build #12</strong> (Run: Fri Oct 31 13:17:00 PDT 2025) - <a href='12/ubuntu-latest/'>Ubuntu</a> / <a href='12/windows-latest/'>Windows</a></li>
+<li><strong>Build #11</strong> (Run: Fri Oct 31 11:29:24 PDT 2025) - <a href='11/ubuntu-latest/'>Ubuntu</a> / <a href='11/windows-latest/'>Windows</a></li>
+<li><strong>Build #10</strong> (Run: Fri Oct 31 11:20:36 PDT 2025) - <a href='10/ubuntu-latest/'>Ubuntu</a> / <a href='10/windows-latest/'>Windows</a></li>
+<li><strong>Build #9</strong> (Run: Fri Oct 31 11:15:39 PDT 2025) - <a href='9/ubuntu-latest/'>Ubuntu</a> / <a href='9/windows-latest/'>Windows</a></li>
+<li><strong>Build #8</strong> (Run: Fri Oct 31 10:56:31 PDT 2025) - <a href='8/ubuntu-latest/'>Ubuntu</a> / <a href='8/windows-latest/'>Windows</a></li>
+<li><strong>Build #7</strong> (Run: Fri Oct 31 10:52:18 PDT 2025) - <a href='7/ubuntu-latest/'>Ubuntu</a> / <a href='7/windows-latest/'>Windows</a></li>
+</ul>
+<div id='chart-container'><canvas id='trendChart'></canvas></div>
+<script>
+const ctx = document.getElementById('trendChart').getContext('2d');
+new Chart(ctx,{
+  type:'line',
+  data:{
+    labels:['17','16','15','14','12','11','10','9','8','7'],
+    datasets:[
+      {label:'PASS', data:[118,118,118,118,118,22,118,118,118,42], borderColor:'green', fill:false},
+      {label:'FAIL', data:[6,6,6,6,6,6,6,6,6,0], borderColor:'red', fill:false},
+      {label:'UNSTABLE', data:[0,0,0,0,0,0,0,0,0,0], borderColor:'orange', fill:false}
+    ]
+  },
+  options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'top'}}, scales:{y:{beginAtZero:true, stepSize:1, title:{display:true,text:'Total Number of Tests'}}, x:{title:{display:true,text:'Build Number'}}}}
+});
+</script>
+<hr><p><em>Generated automatically on Sat Nov  1 13:02:20 PDT 2025</em></p></body></html>
